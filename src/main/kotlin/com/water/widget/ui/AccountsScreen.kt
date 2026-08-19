@@ -75,8 +75,12 @@ fun AccountsScreen(
                     verticalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
                     Text("添加账户", fontWeight = FontWeight.Bold, fontSize = 18.sp)
-                    Text("推荐使用短信登录；如已有登录信息，也可以手动添加。", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 13.sp)
-                    Button(onClick = onSmsLogin, modifier = Modifier.fillMaxWidth()) { Text("短信登录") }
+                    Text(
+                        "设备登录为必需项，用于同步和启动设备；积分登录为补充，完成支付宝端任务可获得更多积分。",
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        fontSize = 13.sp
+                    )
+                    Button(onClick = onSmsLogin, modifier = Modifier.fillMaxWidth()) { Text("短信登录 / 补充登录") }
                     OutlinedButton(onClick = onAddToken, modifier = Modifier.fillMaxWidth()) { Text("手动添加登录信息") }
                 }
             }
@@ -180,8 +184,8 @@ private fun AccountCard(
                     )
                 }
             }
-            AccountInfoRow("积分服务", maskToken(account.alipayToken))
-            AccountInfoRow("设备控制", maskToken(account.appToken))
+            AccountInfoRow("积分登录（补充）", maskToken(account.alipayToken))
+            AccountInfoRow("设备登录（必需）", maskToken(account.appToken))
             AccountInfoRow("设备", account.deviceSummary)
             Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                 Button(onClick = { onSetCurrent(account.phone) }, enabled = !account.current, modifier = Modifier.weight(1f)) {
@@ -189,9 +193,9 @@ private fun AccountCard(
                 }
                 OutlinedButton(onClick = { expanded = true }, modifier = Modifier.weight(1f)) { Text("更多设置") }
                 DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
-                    DropdownMenuItem(text = { Text("复制积分服务登录") }, enabled = account.alipayToken.isNotBlank(), onClick = { expanded = false; onRevealToken(account.phone, false) })
-                    DropdownMenuItem(text = { Text("复制设备控制登录") }, enabled = account.appToken.isNotBlank(), onClick = { expanded = false; onRevealToken(account.phone, true) })
-                    DropdownMenuItem(text = { Text("设置设备控制登录") }, onClick = { expanded = false; onSetAppToken(account.phone) })
+                    DropdownMenuItem(text = { Text("复制积分登录信息") }, enabled = account.alipayToken.isNotBlank(), onClick = { expanded = false; onRevealToken(account.phone, false) })
+                    DropdownMenuItem(text = { Text("复制设备登录信息") }, enabled = account.appToken.isNotBlank(), onClick = { expanded = false; onRevealToken(account.phone, true) })
+                    DropdownMenuItem(text = { Text("设置设备登录") }, onClick = { expanded = false; onSetAppToken(account.phone) })
                     DropdownMenuItem(text = { Text("删除账户") }, onClick = { expanded = false; onDelete(account.phone) })
                 }
             }
@@ -246,7 +250,7 @@ fun TextEntryDialog(
 }
 
 fun maskToken(token: String): String = when {
-    token.isBlank() -> "未设置"
+    token.isBlank() -> "未登录"
     token.length <= 8 -> "••••••••"
     else -> token.take(4) + "••••••••" + token.takeLast(4)
 }

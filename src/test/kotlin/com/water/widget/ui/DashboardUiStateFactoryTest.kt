@@ -17,6 +17,7 @@ class DashboardUiStateFactoryTest {
         val state = DashboardUiState(summary, accounts)
 
         assertEquals("1200", state.summary.scoreTitle)
+        assertEquals("积分登录已完成 · 设备登录未完成", state.summary.accountSubtitle)
         assertEquals(1, state.accounts.size)
         assertTrue(state.accounts.single().isCurrent)
     }
@@ -26,7 +27,7 @@ class DashboardUiStateFactoryTest {
         val state = DashboardUiStateFactory.from(null, 0)
 
         assertEquals("未登录", state.accountTitle)
-        assertEquals("登录后使用设备与积分服务", state.accountSubtitle)
+        assertEquals("完成设备登录后即可使用设备", state.accountSubtitle)
         assertEquals("--", state.scoreTitle)
         assertEquals("暂无积分", state.scoreSubtitle)
         assertFalse(state.hasAccount)
@@ -49,7 +50,7 @@ class DashboardUiStateFactoryTest {
         val state = DashboardUiStateFactory.from(account, 2, 2380)
 
         assertEquals("测试账户", state.accountTitle)
-        assertEquals("设备控制已连接", state.accountSubtitle)
+        assertEquals("设备与积分登录均已完成", state.accountSubtitle)
         assertEquals("2380", state.scoreTitle)
         assertEquals("≈2.38元可用", state.scoreSubtitle)
         assertTrue(state.hasAccount)
@@ -107,8 +108,8 @@ class DashboardUiStateFactoryTest {
         assertEquals("¥0.25", state.usage.todayCostText)
         assertEquals("¥0.25", state.usage.monthCostText)
         assertEquals("¥0.41", state.usage.yearCostText)
-        assertEquals("781 ml", state.usage.todayWaterText)
-        assertEquals("781 ml", state.usage.monthWaterText)
+        assertEquals("780 ml", state.usage.todayWaterText)
+        assertEquals("780 ml", state.usage.monthWaterText)
         assertEquals("1.3 L", state.usage.yearWaterText)
     }
 
@@ -121,10 +122,10 @@ class DashboardUiStateFactoryTest {
 
         assertEquals(2, states.size)
         assertTrue(states[0].isCurrent)
-        assertEquals("积分与设备服务均已连接", states[0].subtitle)
-        assertEquals("积分服务已连接 · 设备控制已连接", states[0].tokenSummary)
+        assertEquals("设备与积分登录均已完成", states[0].subtitle)
+        assertEquals("积分登录已完成 · 设备登录已完成", states[0].tokenSummary)
         assertEquals("1 台设备", states[0].deviceSummary)
         assertFalse(states[1].isCurrent)
-        assertEquals("可使用设备控制", states[1].subtitle)
+        assertEquals("设备登录已完成 · 可补充积分登录", states[1].subtitle)
     }
 }

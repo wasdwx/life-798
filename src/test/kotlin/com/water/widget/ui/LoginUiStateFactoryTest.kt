@@ -7,22 +7,24 @@ import org.junit.Test
 
 class LoginUiStateFactoryTest {
     @Test
-    fun `积分服务登录展示精简文案`() {
+    fun `积分登录说明可获得更多积分`() {
         val state = LoginUiStateFactory.from(LoginPlatform.ALIPAY, false, false, "13800000000", "", "")
 
-        assertEquals("积分服务", state.platformTitle)
-        assertEquals("保存积分服务登录", state.actionLabel)
+        assertEquals("积分登录", state.platformTitle)
+        assertEquals("补充：完成支付宝端积分任务，获得更多积分", state.platformDescription)
+        assertEquals("完成积分登录", state.actionLabel)
         assertTrue(state.canLoadCaptcha)
         assertFalse(state.canSendSms)
         assertFalse(state.canLogin)
     }
 
     @Test
-    fun `设备控制登录使用对应保存按钮`() {
+    fun `设备登录标明为必需项`() {
         val state = LoginUiStateFactory.from(LoginPlatform.APP, true, true, "13800000000", "1234", "1234")
 
-        assertEquals("设备控制", state.platformTitle)
-        assertEquals("保存设备控制登录", state.actionLabel)
+        assertEquals("设备登录", state.platformTitle)
+        assertEquals("必需：同步设备、启动出水、钱包充值与 App 端积分任务", state.platformDescription)
+        assertEquals("完成设备登录", state.actionLabel)
         assertTrue(state.canSendSms)
         assertTrue(state.canLogin)
     }

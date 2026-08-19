@@ -36,8 +36,8 @@ android {
         // 固定正式包名，所有本地与 CI 构建都保持一致；不要按 buildType 添加后缀。
         minSdk = 26
         targetSdk = 35
-        versionCode = 15
-        versionName = "5.2.0"
+        versionCode = 16
+        versionName = "5.3.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
@@ -118,6 +118,7 @@ dependencies {
     implementation("androidx.lifecycle:lifecycle-runtime-compose:2.8.7")
     implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.8.7")
     implementation("androidx.lifecycle:lifecycle-viewmodel-ktx:2.8.7")
+    implementation("com.alipay.sdk:alipaysdk-android:15.8.16")
     // 与 ImageToolbox 相同的 CameraX + ML Kit 扫码路线；bundled 模型无需依赖 Google Play 服务。
     implementation("com.github.T8RIN.QuickieExtended:quickie-bundled:1.18.1")
 

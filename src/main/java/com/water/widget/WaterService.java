@@ -64,7 +64,7 @@ public class WaterService extends Service {
         String accountKey = account.phone != null && !account.phone.isEmpty()
                 ? account.phone
                 : account.uid;
-        String scoreToken = account.hasToken() ? account.token : account.appToken;
+        String scoreToken = account.hasToken() ? account.token : "";
         Intent intent = new Intent(context, WaterService.class)
                 .putExtra(EXTRA_DID, did)
                 .putExtra(EXTRA_WIDGET_ID, widgetId)
@@ -236,6 +236,9 @@ public class WaterService extends Service {
                                 current.billBaseline
                         );
                         if (bill != null) {
+                            if (current.scoreToken.isEmpty() && !current.accountKey.isEmpty()) {
+                                UsageHistoryStore.INSTANCE.record(this, current.accountKey, bill);
+                            }
                             finishConsumption(current, bill);
                         } else {
                             pollScoreConsumption(current);

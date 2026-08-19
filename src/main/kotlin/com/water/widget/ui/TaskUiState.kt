@@ -25,7 +25,11 @@ object TaskUiStateFactory {
             running = running,
             totalGainedText = totalGained.toString(),
             canRun = !running && runnable > 0,
-            summary = if (runnable == 0) "请先登录账号" else "$runnable 个账号可运行",
+            summary = when {
+                accounts.isEmpty() -> "请先添加账户"
+                runnable == 0 -> "请完成积分登录"
+                else -> "$runnable 个账号可运行"
+            },
             logs = logs,
             hasFailures = logs.any { it.contains("❌") || it.contains("失败") || it.contains("错误") }
         )

@@ -53,7 +53,7 @@ object DashboardUiStateFactory {
         if (account == null) {
             return DashboardSummaryUiState(
                 accountTitle = "未登录",
-                accountSubtitle = "登录后使用设备与积分服务",
+                accountSubtitle = "完成设备登录后即可使用设备",
                 scoreTitle = "--",
                 scoreSubtitle = "暂无积分",
                 hasAccount = false,
@@ -72,7 +72,12 @@ object DashboardUiStateFactory {
         val hasDevices = account.hasDevices()
         return DashboardSummaryUiState(
             accountTitle = title,
-            accountSubtitle = if (hasAppToken) "设备控制已连接" else "设备控制未登录",
+            accountSubtitle = when {
+                account.hasToken() && hasAppToken -> "设备与积分登录均已完成"
+                account.hasToken() -> "积分登录已完成 · 设备登录未完成"
+                hasAppToken -> "设备登录已完成 · 可补充积分登录"
+                else -> "两项登录均未完成"
+            },
             scoreTitle = validScore?.toString() ?: "刷新中",
             scoreSubtitle = validScore?.let { "≈${String.format(java.util.Locale.CHINA, "%.2f", it / 1000.0)}元可用" } ?: "当前账号积分",
             hasAccount = true,
@@ -151,7 +156,7 @@ object DashboardUiStateFactory {
         val millilitres = score * 500 / 160
         return when {
             millilitres >= 1000 -> String.format(Locale.CHINA, "%.1f L", millilitres / 1000.0)
-            else -> "$millilitres ml"
+            else -> "${(millilitres + 5) / 10 * 10} ml"
         }
     }
 
@@ -161,14 +166,14 @@ object DashboardUiStateFactory {
                 phone = account.phone.orEmpty(),
                 title = account.name?.takeIf { it.isNotBlank() } ?: account.phone?.takeIf { it.isNotBlank() } ?: "未命名账号",
                 subtitle = when {
-                    account.hasToken() && account.hasAppToken() -> "积分与设备服务均已连接"
-                    account.hasToken() -> "积分服务已连接"
-                    account.hasAppToken() -> "可使用设备控制"
+                    account.hasToken() && account.hasAppToken() -> "设备与积分登录均已完成"
+                    account.hasToken() -> "积分登录已完成 · 设备登录未完成"
+                    account.hasAppToken() -> "设备登录已完成 · 可补充积分登录"
                     else -> "需要重新登录或补充登录信息"
                 },
                 tokenSummary = buildList {
-                    add(if (account.hasToken()) "积分服务已连接" else "积分服务未登录")
-                    add(if (account.hasAppToken()) "设备控制已连接" else "设备控制未登录")
+                    add(if (account.hasToken()) "积分登录已完成" else "积分登录未完成")
+                    add(if (account.hasAppToken()) "设备登录已完成" else "设备登录未完成")
                 }.joinToString(" · "),
                 deviceSummary = if (account.hasDevices()) "${account.rememberedDevices().size} 台设备" else "暂无设备",
                 isCurrent = account.phone == currentPhone

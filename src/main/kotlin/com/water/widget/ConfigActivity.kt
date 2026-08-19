@@ -73,6 +73,7 @@ class ConfigActivity : ComponentActivity() {
                     },
                     onRunTasks = { runWithNotificationPermission(::runTasksInHome) },
                     onScores = { startActivity(Intent(this, ScoreActivity::class.java)) },
+                    onWallet = { startActivity(Intent(this, WalletActivity::class.java)) },
                     onSelectAccount = { phone -> switchAccount(phone) },
                     onFetchDevices = { fetchDevices(showFeedback = true) },
                     onAddDevice = { openAddDevice() },
@@ -99,7 +100,7 @@ class ConfigActivity : ComponentActivity() {
         val openedForRecovery = intent.getBooleanExtra(EXTRA_OPEN_WATER_RECOVERY, false)
         if (openedForRecovery) {
             intent.removeExtra(EXTRA_OPEN_WATER_RECOVERY)
-            ui.post { toast("控制中心出水失败，请检查设备控制登录信息、设备与签约状态") }
+            ui.post { toast("控制中心出水失败，请检查设备登录信息、设备与签约状态") }
         }
     }
 
@@ -127,7 +128,7 @@ class ConfigActivity : ComponentActivity() {
                 true
             }
             TaskForegroundService.StartResult.NO_ACCOUNTS -> {
-                toast("没有可运行账号，请先登录或导入账户信息")
+                toast("没有可运行账号，请先完成积分登录")
                 false
             }
             TaskForegroundService.StartResult.FAILED -> {
@@ -316,7 +317,7 @@ class ConfigActivity : ComponentActivity() {
             return false
         }
         if (!account.hasAppToken()) {
-            toast("启动设备需要设备控制登录信息，请在账户管理中补充")
+            toast("请用同一手机号再次短信登录，并选择设备登录")
             return false
         }
 

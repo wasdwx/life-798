@@ -72,7 +72,7 @@ fun LoginScreen(
     ) {
         LoginHero(state = state, onPlatformChange = onPlatformChange)
 
-        SectionCard(state.platformTitle, state.nextHint) {
+        SectionCard(state.platformTitle, "${state.platformDescription} · ${state.nextHint}") {
             OutlinedTextField(
                 value = phone,
                 onValueChange = onPhoneChange,
@@ -188,7 +188,10 @@ private fun LoginHero(state: LoginUiState, onPlatformChange: (LoginPlatform) -> 
             verticalArrangement = Arrangement.spacedBy(6.dp)
         ) {
             Text("登录账户", fontSize = 28.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onPrimaryContainer)
-            Text("分别完成积分服务和设备控制登录", color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.78f))
+            Text(
+                "先完成设备登录才能使用设备；再补充积分登录，可获得更多积分。两项需分别登录。",
+                color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.78f)
+            )
             Spacer(Modifier.height(6.dp))
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
                 LoginPlatform.entries.forEach { item ->

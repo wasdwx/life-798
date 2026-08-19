@@ -2,6 +2,7 @@ package com.water.widget;
 
 import android.content.Context;
 
+import org.json.JSONException;
 import org.json.JSONObject;
 
 import java.io.BufferedReader;
@@ -229,6 +230,58 @@ public class IlifeApi {
                 cb.onResult(null, e.getMessage());
             }
         }).start();
+    }
+
+    /** 使用设备控制登录信息获取账户钱包。 */
+    public static void walletOwnerWithToken(final String appToken, final JsonCallback cb) {
+        requestApp("GET", "/acc/wallet/owner", null, appToken, cb);
+    }
+
+    /** 获取指定钱包端点的充值产品。 */
+    public static void rechargeProductsWithToken(final String appToken,
+                                                 final String endpointId,
+                                                 final JsonCallback cb) {
+        String path = "/prd/lst?eid=" + enc(endpointId)
+                + "&type=1&status=1&all=false&did=&page=0&size=100&hasCount=false";
+        requestApp("GET", path, null, appToken, cb);
+    }
+
+    /** 为指定钱包和充值产品创建订单。 */
+    public static void createRechargeOrderWithToken(final String appToken,
+                                                    final String endpointId,
+                                                    final String ownerId,
+                                                    final String productId,
+                                                    final JsonCallback cb) {
+        requestApp(
+                "POST",
+                "/bill/save",
+                rechargeOrderBody(endpointId, ownerId, productId),
+                appToken,
+                cb
+        );
+    }
+
+    /** 获取支付宝 SDK 所需的支付字符串。 */
+    public static void prepayAlipayWithToken(final String appToken,
+                                             final String orderId,
+                                             final JsonCallback cb) {
+        requestApp("GET", "/trans/prepay/21?id=" + enc(orderId), null, appToken, cb);
+    }
+
+    static JSONObject rechargeOrderBody(String endpointId, String ownerId, String productId) {
+        try {
+            return new JSONObject()
+                    .put("cata", 1)
+                    .put("contact", new JSONObject().put("id", ownerId))
+                    .put("ep", new JSONObject().put("id", endpointId))
+                    .put("note", "钱包充值")
+                    .put("owner", new JSONObject().put("id", ownerId))
+                    .put("prds", new org.json.JSONArray().put(
+                            new JSONObject().put("id", productId).put("count", 1)
+                    ));
+        } catch (JSONException e) {
+            throw new IllegalStateException("无法创建充值订单请求", e);
+        }
     }
 
     /** 用指定 token 执行积分任务（用于双平台合并）。 */
@@ -517,6 +570,25 @@ public class IlifeApi {
                 String resp = httpRaw("POST", GATEWAY + path,
                         body != null ? body.toString() : null, token);
                 cb.onResult(new JSONObject(resp), null);
+            } catch (Exception e) {
+                cb.onResult(null, e.getMessage());
+            }
+        }).start();
+    }
+
+    private static void requestApp(final String method, final String path,
+                                   final JSONObject body, final String appToken,
+                                   final JsonCallback cb) {
+        new Thread(() -> {
+            try {
+                String response = httpRawApp(
+                        method,
+                        GATEWAY + path,
+                        body != null ? body.toString() : null,
+                        appToken,
+                        "1,1"
+                );
+                cb.onResult(new JSONObject(response), null);
             } catch (Exception e) {
                 cb.onResult(null, e.getMessage());
             }

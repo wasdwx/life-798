@@ -48,17 +48,17 @@ class WaterConsumptionParserTest {
             .put(
                 "data",
                 JSONArray().put(
-                    JSONObject()
-                        .put("ctime", 1_800_000_005L)
-                        .put("type", 107)
-                        .put("score", -320)
-                        .put("title", "饮水消费")
+                        JSONObject()
+                            .put("ctime", 1_800_000_005L)
+                            .put("type", 107)
+                            .put("score", -335)
+                            .put("title", "饮水消费")
                 )
             )
 
         val result = WaterConsumptionParser.latestSince(json, 1_800_000_000_000L)
 
-        assertEquals(320, result?.spentScore)
+        assertEquals(335, result?.spentScore)
         assertEquals("1.0 L", result?.estimatedWaterText)
     }
 
@@ -107,14 +107,14 @@ class WaterConsumptionParserTest {
                             .put("ctime", 1_800_000_003_000L)
                             .put("utime", 1_800_000_004_000L)
                             .put("status", 3)
-                            .put("payment", 0.16)
+                            .put("payment", 0.25)
                     )
             )
 
         val result = WaterBillParser.latestSince(json, 1_800_000_000_000L)
 
-        assertEquals("¥0.16", result?.moneyText)
-        assertEquals("500 ml", result?.estimatedWaterText)
+        assertEquals("¥0.25", result?.moneyText)
+        assertEquals("780 ml", result?.estimatedWaterText)
     }
 
     @Test

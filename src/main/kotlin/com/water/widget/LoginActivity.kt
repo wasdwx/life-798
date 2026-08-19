@@ -15,10 +15,10 @@ import com.water.widget.ui.WaterTheme
 import org.json.JSONObject
 
 /**
- * Compose 版登录页：选择积分服务或设备控制并完成短信验证。
+ * Compose 版登录页：先完成设备登录，再按需补充积分登录。
  */
 class LoginActivity : ComponentActivity() {
-    private var platform = LoginPlatform.ALIPAY
+    private var platform = LoginPlatform.APP
     private var phone = ""
     private var graphCode = ""
     private var smsCode = ""
@@ -151,7 +151,15 @@ class LoginActivity : ComponentActivity() {
         if (TextUtils.isEmpty(account.eid)) account.eid = loginData.optString("eid")
         AccountStore.addOrUpdate(this, account)
         fetchUidAsync(phone, newToken)
-        toast(if (platform == LoginPlatform.APP) "设备控制登录已保存" else "积分服务登录已保存")
+        toast(
+            if (account.hasToken() && account.hasAppToken()) {
+                "设备与积分登录均已完成"
+            } else if (platform == LoginPlatform.APP) {
+                "设备登录已完成；现在可使用设备，补充积分登录可获得更多积分"
+            } else {
+                "积分登录已完成；请先用同一手机号完成设备登录以使用设备"
+            }
+        )
         setResult(Activity.RESULT_OK)
         finish()
     }

@@ -60,7 +60,8 @@ fun TaskScreen(
     val actionLabel = when {
         state.running -> "任务执行中"
         state.canRun -> "运行今日任务"
-        else -> "暂不可执行"
+        state.totalAccounts == 0 -> "请先添加账户"
+        else -> "需完成积分登录"
     }
 
     Column(

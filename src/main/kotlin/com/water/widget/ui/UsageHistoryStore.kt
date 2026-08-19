@@ -1,6 +1,7 @@
 package com.water.widget.ui
 
 import android.content.Context
+import com.water.widget.WaterConsumption
 import org.json.JSONArray
 import org.json.JSONObject
 import java.security.MessageDigest
@@ -9,7 +10,7 @@ import java.util.LinkedHashSet
 import java.util.Locale
 
 /**
- * 将服务端当前可见的消费流水增量合并到本地日汇总。
+ * 将服务端当前可见的积分流水与本地确认的设备账单合并到日汇总。
  * 服务端缩短流水窗口时，已经记录到本地的历史不会随之减少。
  */
 object UsageHistoryStore {
@@ -28,6 +29,18 @@ object UsageHistoryStore {
         return ledger.toUiState()
     }
 
+    fun record(context: Context, accountKey: String, consumption: WaterConsumption) {
+        if (accountKey.isBlank()) return
+        val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+        val key = "account_${digest(accountKey)}"
+        val ledger = UsageHistoryLedger.fromJson(
+            runCatching { JSONObject(prefs.getString(key, "{}").orEmpty()) }.getOrDefault(JSONObject())
+        )
+        if (ledger.recordLocal(consumption.historyKey, consumption.occurredAt, consumption.scoreEquivalent)) {
+            prefs.edit().putString(key, ledger.toJson().toString()).apply()
+        }
+    }
+
     private fun digest(value: String): String = MessageDigest.getInstance("SHA-256")
         .digest(value.toByteArray(Charsets.UTF_8))
         .joinToString("") { "%02x".format(it) }
@@ -35,7 +48,8 @@ object UsageHistoryStore {
 
 internal class UsageHistoryLedger(
     private val seen: LinkedHashSet<String> = LinkedHashSet(),
-    private val dayTotals: MutableMap<String, Int> = linkedMapOf()
+    private val dayTotals: MutableMap<String, Int> = linkedMapOf(),
+    private var localThrough: Long = 0L
 ) {
     fun merge(scoreJson: JSONObject?): Boolean {
         if (scoreJson == null || scoreJson.optInt("code", -999) != 0) return false
@@ -43,17 +57,29 @@ internal class UsageHistoryLedger(
         var changed = false
         for (index in 0 until records.length()) {
             val record = records.optJSONObject(index) ?: continue
-            val time = record.optLong("ctime", 0L)
             val data = record.optJSONObject("data")
             val amount = readSpentScore(record, data)
-            if (time <= 0L || amount <= 0 || !isConsumption(record, data)) continue
-            val fingerprint = recordFingerprint(record)
-            if (!seen.add(fingerprint)) continue
-            val day = dayKey(time)
-            dayTotals[day] = (dayTotals[day] ?: 0) + amount
-            changed = true
+            if (amount <= 0 || !isConsumption(record, data)) continue
+            val time = normalizeEpochMillis(record.optLong("ctime", 0L))
+            if (time <= localThrough) continue
+            if (record(recordIdentity(record), time, amount)) changed = true
         }
         return changed
+    }
+
+    fun recordLocal(historyKey: String, time: Long, amount: Int): Boolean {
+        val occurredAt = normalizeEpochMillis(time)
+        if (historyKey.isBlank() || occurredAt <= 0L || amount <= 0) return false
+        val boundaryChanged = occurredAt > localThrough
+        if (boundaryChanged) localThrough = occurredAt
+        return record(historyKey, occurredAt, amount) || boundaryChanged
+    }
+
+    private fun record(historyKey: String, occurredAt: Long, amount: Int): Boolean {
+        if (!seen.add(fingerprint(historyKey))) return false
+        val day = dayKey(occurredAt)
+        dayTotals[day] = (dayTotals[day] ?: 0) + amount
+        return true
     }
 
     fun toUiState(now: Calendar = Calendar.getInstance()): WaterUsageUiState {
@@ -84,6 +110,7 @@ internal class UsageHistoryLedger(
         return JSONObject()
             .put("seen", JSONArray(seen.toList()))
             .put("days", days)
+            .put("localThrough", localThrough)
     }
 
     companion object {
@@ -102,17 +129,18 @@ internal class UsageHistoryLedger(
                     values.optInt(day, 0).takeIf { it > 0 }?.let { days[day] = it }
                 }
             }
-            return UsageHistoryLedger(seen, days)
+            return UsageHistoryLedger(seen, days, json.optLong("localThrough", 0L))
         }
 
-        private fun recordFingerprint(record: JSONObject): String {
-            val explicitId = arrayOf("id", "sid", "serialNo", "orderId", "bizId")
+        private fun recordIdentity(record: JSONObject): String {
+            return arrayOf("id", "sid", "serialNo", "orderId", "bizId")
                 .firstNotNullOfOrNull { key -> record.optString(key, "").takeIf(String::isNotBlank) }
-            val raw = explicitId ?: record.toString()
-            return MessageDigest.getInstance("SHA-256")
-                .digest(raw.toByteArray(Charsets.UTF_8))
-                .joinToString("") { "%02x".format(it) }
+                ?: record.toString()
         }
+
+        private fun fingerprint(value: String): String = MessageDigest.getInstance("SHA-256")
+            .digest(value.toByteArray(Charsets.UTF_8))
+            .joinToString("") { "%02x".format(it) }
 
         private fun dayKey(time: Long): String {
             val date = Calendar.getInstance().apply { timeInMillis = time }
@@ -126,21 +154,35 @@ internal class UsageHistoryLedger(
 
         private fun readSpentScore(record: JSONObject, data: JSONObject?): Int {
             val keys = arrayOf("spend", "score", "changeScore", "change_score", "amount", "value", "num", "points")
-            for (key in keys) if (record.has(key)) return kotlin.math.abs(record.optInt(key, 0))
-            if (data != null) for (key in keys) if (data.has(key)) return kotlin.math.abs(data.optInt(key, 0))
+            readNonZero(data, "spend")?.let { return kotlin.math.abs(it) }
+            readNonZero(record, "spend")?.let { return kotlin.math.abs(it) }
+            val type = record.optInt("type", data?.optInt("type", Int.MIN_VALUE) ?: Int.MIN_VALUE)
+            if (type != 107) return 0
+            for (key in keys) {
+                if (key != "spend") readNonZero(record, key)?.let { return kotlin.math.abs(it) }
+            }
+            if (data != null) {
+                for (key in keys) {
+                    if (key != "spend") readNonZero(data, key)?.let { return kotlin.math.abs(it) }
+                }
+            }
             return 0
         }
 
         private fun isConsumption(record: JSONObject, data: JSONObject?): Boolean {
-            if (record.optInt("type", data?.optInt("type", Int.MIN_VALUE) ?: Int.MIN_VALUE) == 107) return true
-            if (data?.has("spend") == true) return true
-            val keys = arrayOf("msg", "direction", "typeName", "scene", "bizType", "name", "title", "desc", "remark", "memo")
-            val text = buildString {
-                keys.forEach { append(record.optString(it, "")); append(' ') }
-                if (data != null) keys.forEach { append(data.optString(it, "")); append(' ') }
-            }.lowercase(Locale.ROOT)
-            return listOf("消费", "使用", "扣", "支出", "兑换", "water", "pay", "cost", "consume", "decrease")
-                .any(text::contains)
+            val type = record.optInt("type", data?.optInt("type", Int.MIN_VALUE) ?: Int.MIN_VALUE)
+            return type == 107 || readNonZero(data, "spend") != null || readNonZero(record, "spend") != null
+        }
+
+        private fun readNonZero(json: JSONObject?, key: String): Int? {
+            if (json == null || !json.has(key) || json.isNull(key)) return null
+            return json.optInt(key, 0).takeIf { it != 0 }
+        }
+
+        private fun normalizeEpochMillis(value: Long): Long = when {
+            value <= 0L -> 0L
+            value < 10_000_000_000L -> value * 1000L
+            else -> value
         }
 
         private fun moneyText(score: Int): String = "¥${String.format(Locale.CHINA, "%.2f", score / 1000.0)}"
@@ -150,7 +192,8 @@ internal class UsageHistoryLedger(
             return if (millilitres >= 1000) {
                 String.format(Locale.CHINA, "%.1f L", millilitres / 1000.0)
             } else {
-                "$millilitres ml"
+                val roundedMillilitres = (millilitres + 5) / 10 * 10
+                "$roundedMillilitres ml"
             }
         }
     }

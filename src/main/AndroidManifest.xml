@@ -11,6 +11,10 @@
         android:name="android.hardware.camera"
         android:required="false" />
 
+    <queries>
+        <package android:name="com.eg.android.AlipayGphone" />
+    </queries>
+
     <application
         android:label="@string/app_name"
         android:icon="@drawable/ic_launcher"
@@ -55,6 +59,11 @@
             android:name=".ScoreActivity"
             android:exported="false"
             android:label="积分看板" />
+
+        <activity
+            android:name=".WalletActivity"
+            android:exported="false"
+            android:label="钱包充值" />
 
         <receiver
             android:name=".WaterWidgetProvider"

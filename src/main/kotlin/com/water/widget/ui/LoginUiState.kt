@@ -1,8 +1,8 @@
 package com.water.widget.ui
 
 enum class LoginPlatform(val title: String, val description: String, val actionLabel: String) {
-    ALIPAY("积分服务", "积分、签到与日常任务", "保存积分服务登录"),
-    APP("设备控制", "设备启动与应用任务", "保存设备控制登录")
+    APP("设备登录", "必需：同步设备、启动出水、钱包充值与 App 端积分任务", "完成设备登录"),
+    ALIPAY("积分登录", "补充：完成支付宝端积分任务，获得更多积分", "完成积分登录")
 }
 
 data class LoginUiState(

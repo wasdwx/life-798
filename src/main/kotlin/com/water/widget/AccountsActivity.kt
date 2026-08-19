@@ -35,7 +35,7 @@ class AccountsActivity : ComponentActivity() {
         setContent {
             WaterTheme(mode = ThemeSettings.mode(this)) {
                 val login = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) {
-                    if (it.resultCode == RESULT_OK) toast("登录成功，已设为当前账户")
+                    if (it.resultCode == RESULT_OK) toast("登录已保存；同一手机号的两项状态会显示在同一账户中")
                     refresh()
                 }
                 AccountsScreen(
@@ -62,8 +62,12 @@ class AccountsActivity : ComponentActivity() {
         when (val state = dialog) {
             DialogState.AddToken -> TextEntryDialog(
                 title = "手动添加登录信息",
-                message = "登录信息属于敏感内容。请仅在可信环境中粘贴，保存前会在线核验账户。",
-                fields = listOf("手机号" to "", "积分服务登录" to "", "设备控制登录（可选）" to ""),
+                message = "设备登录为必需项；积分登录可稍后补充。登录信息属于敏感内容，保存前会在线核验账户。",
+                fields = listOf(
+                    "手机号" to "",
+                    "积分登录（补充：支付宝端任务可获得更多积分）" to "",
+                    "设备登录（必需：设备、App 端任务与充值）" to ""
+                ),
                 sensitive = true,
                 onDismiss = { dialog = null },
                 onConfirm = { dialog = null; addByToken(it) }
@@ -71,9 +75,9 @@ class AccountsActivity : ComponentActivity() {
             is DialogState.SetAppToken -> {
                 val account = AccountStore.get(this, state.phone)
                 TextEntryDialog(
-                    title = "设置设备控制登录",
-                    message = "这项登录信息用于启用设备控制和官方应用专属服务，请妥善保管。",
-                    fields = listOf("设备控制登录" to account?.appToken.orEmpty()),
+                    title = "手动填写设备登录",
+                    message = "设备登录为必需项，用于设备启动、App 端积分任务与钱包充值。",
+                    fields = listOf("设备登录" to account?.appToken.orEmpty()),
                     sensitive = true,
                     onDismiss = { dialog = null },
                     onConfirm = { values ->
@@ -89,7 +93,7 @@ class AccountsActivity : ComponentActivity() {
                 val token = if (state.app) account?.appToken.orEmpty() else account?.token.orEmpty()
                 AlertDialog(
                     onDismissRequest = { dialog = null },
-                    title = { Text(if (state.app) "设备控制登录" else "积分服务登录") },
+                    title = { Text(if (state.app) "设备登录" else "积分登录") },
                     text = { Text("这是一段敏感登录信息，请勿发送给他人或粘贴到不可信应用。\n\n$token") },
                     confirmButton = { TextButton(onClick = { copySensitive(token); dialog = null }) { Text("复制登录信息") } },
                     dismissButton = { TextButton(onClick = { dialog = null }) { Text("关闭") } }
@@ -202,8 +206,8 @@ class AccountsActivity : ComponentActivity() {
 
                         val details = buildList {
                             addAll(resolution.notices)
-                            if (resolution.mainToken.isBlank()) add("仍需补充积分服务登录")
-                            if (resolution.appToken.isBlank()) add("仍需补充设备控制登录")
+                            if (resolution.appToken.isBlank()) add("仍需完成设备登录，才能使用设备")
+                            if (resolution.mainToken.isBlank()) add("可补充积分登录，获得更多积分")
                         }.distinct()
                         toastLong(
                             if (details.isEmpty()) "登录信息验证并保存成功"

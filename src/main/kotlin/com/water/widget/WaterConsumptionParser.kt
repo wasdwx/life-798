@@ -14,23 +14,27 @@ import kotlin.math.roundToInt
 data class WaterConsumption(
     val spentScore: Int,
     val occurredAt: Long,
-    val paymentYuan: Double? = null
+    val paymentYuan: Double? = null,
+    val historyKey: String
 ) {
+    val scoreEquivalent: Int
+        get() = if (spentScore > 0) {
+            spentScore
+        } else {
+            ((paymentYuan ?: 0.0) * 1000).roundToInt()
+        }
+
     val moneyText: String
         get() = "¥${String.format(Locale.CHINA, "%.2f", paymentYuan ?: spentScore / 1000.0)}"
 
     val estimatedWaterText: String
         get() {
-            val scoreEquivalent = if (spentScore > 0) {
-                spentScore
-            } else {
-                ((paymentYuan ?: 0.0) * 1000).roundToInt()
-            }
             val millilitres = scoreEquivalent * 500 / 160
             return if (millilitres >= 1000) {
                 String.format(Locale.CHINA, "%.1f L", millilitres / 1000.0)
             } else {
-                "$millilitres ml"
+                val roundedMillilitres = (millilitres + 5) / 10 * 10
+                "$roundedMillilitres ml"
             }
         }
 }
@@ -88,7 +92,8 @@ object WaterBillParser {
                 latest = WaterConsumption(
                     spentScore = 0,
                     occurredAt = occurredAt,
-                    paymentYuan = payment
+                    paymentYuan = payment,
+                    historyKey = WaterRecordFields.recordKey("bill", record, record.optJSONObject("data"))
                 )
             }
         }
@@ -142,7 +147,11 @@ object WaterConsumptionParser {
             val amount = readSpentScore(record, data)
             if (amount <= 0 || !isConsumption(record, data)) continue
             if (latest == null || occurredAt > latest.occurredAt) {
-                latest = WaterConsumption(amount, occurredAt)
+                latest = WaterConsumption(
+                    spentScore = amount,
+                    occurredAt = occurredAt,
+                    historyKey = WaterRecordFields.recordKey("score", record, data)
+                )
             }
         }
         return latest

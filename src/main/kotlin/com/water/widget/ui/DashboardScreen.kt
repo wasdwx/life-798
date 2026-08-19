@@ -23,6 +23,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowForwardIos
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.AccountBalanceWallet
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.DarkMode
@@ -86,6 +87,7 @@ fun DashboardScreen(
     onThemeModeChange: (AppThemeMode) -> Unit,
     onRunTasks: () -> Unit,
     onScores: () -> Unit,
+    onWallet: () -> Unit,
     onSelectAccount: (String) -> Unit,
     onFetchDevices: () -> Unit,
     onAddDevice: () -> Unit,
@@ -126,6 +128,7 @@ fun DashboardScreen(
                     onLogin = onLogin,
                     onAccounts = onAccounts,
                     onScores = onScores,
+                    onWallet = onWallet,
                     themeMode = themeMode,
                     onOpenAppearanceSettings = { showAppearanceSettings = true },
                     onOpenSupport = { showSupportDialog = true }
@@ -472,8 +475,8 @@ private fun DeviceListItem(
 @Composable
 private fun ConfigurationNotice(state: DashboardSummaryUiState) {
     val (title, detail) = when {
-        !state.hasAccount -> "尚未登录账号" to "登录账号后可同步设备并使用出水控制。"
-        !state.hasAppToken -> "设备控制尚未开通" to "请在账户管理中补充设备控制登录信息后再试。"
+        !state.hasAccount -> "尚未登录账号" to "登录账号后，完成设备登录即可同步设备并使用出水控制。"
+        !state.hasAppToken -> "尚未完成设备登录" to "使用同一手机号再次短信登录并选择“设备登录”，完成后即可使用设备。"
         else -> "暂无设备" to "点击右上角加号添加设备。"
     }
     Surface(shape = RoundedCornerShape(16.dp), color = MaterialTheme.colorScheme.errorContainer) {
@@ -493,6 +496,7 @@ private fun MineTab(
     onLogin: () -> Unit,
     onAccounts: () -> Unit,
     onScores: () -> Unit,
+    onWallet: () -> Unit,
     themeMode: AppThemeMode,
     onOpenAppearanceSettings: () -> Unit,
     onOpenSupport: () -> Unit
@@ -502,7 +506,7 @@ private fun MineTab(
     InfoCard(title = state.accountTitle, subtitle = state.accountSubtitle) {
         StatusRow("账号数量", "${state.accountCount}")
         StatusRow("当前积分", state.scoreTitle)
-        StatusRow("设备控制", if (state.hasAppToken) "已开通" else "待开通")
+        StatusRow("设备登录（必需）", if (state.hasAppToken) "已完成" else "未完成")
         Spacer(Modifier.height(12.dp))
         Row(horizontalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.fillMaxWidth()) {
             Button(onClick = onLogin, modifier = Modifier.weight(1f), shape = RoundedCornerShape(16.dp)) { Text("登录") }
@@ -510,6 +514,12 @@ private fun MineTab(
         }
         OutlinedButton(onClick = onScores, modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(16.dp)) { Text("查看积分与流水") }
     }
+    SettingsRow(
+        icon = Icons.Default.AccountBalanceWallet,
+        title = "钱包与充值",
+        subtitle = if (state.hasAppToken) "查看余额并充值" else "需要设备登录",
+        onClick = onWallet
+    )
     SettingsRow(
         icon = Icons.Default.DarkMode,
         title = "外观设置",
@@ -575,7 +585,7 @@ private fun AccountSwitcherDialog(accounts: List<DashboardAccountUiState>, onDis
         title = { Text("切换账号", fontWeight = FontWeight.Bold) },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text("选择用于设备控制和积分查询的账号", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 13.sp)
+                Text("选择当前使用的账号", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 13.sp)
                 Spacer(Modifier.height(2.dp))
                 accounts.forEach { account ->
                     Surface(
@@ -743,7 +753,7 @@ private fun DashboardPreview() {
     WaterTheme {
         DashboardScreen(
             state = DashboardUiState(summary = DashboardSummaryUiState("测试账户", "设备控制已连接", "2380", "≈2.38元可用", true, true, true, 2, listOf(DeviceUiState("device-001", "一号饮水机"), DeviceUiState("device-002", "二号饮水机")))),
-            onLogin = {}, onAccounts = {}, themeMode = AppThemeMode.SYSTEM, onThemeModeChange = {}, onRunTasks = {}, onScores = {}, onSelectAccount = {}, onFetchDevices = {}, onAddDevice = {}, onEditDevice = { _, _ -> }, onRemoveDevice = {}, onSelectDevice = {}, onStartDevice = {}
+            onLogin = {}, onAccounts = {}, themeMode = AppThemeMode.SYSTEM, onThemeModeChange = {}, onRunTasks = {}, onScores = {}, onWallet = {}, onSelectAccount = {}, onFetchDevices = {}, onAddDevice = {}, onEditDevice = { _, _ -> }, onRemoveDevice = {}, onSelectDevice = {}, onStartDevice = {}
         )
     }
 }
