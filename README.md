@@ -6,7 +6,7 @@ WaterWidget 是一个面向慧生活798用户的第三方 Android 设备控制�
 
 ## 功能
 
-- 饮水设备一键启动；水温由设备上的实体按钮决定，接水结束后通知本次消费与估算水量
+- 饮水设备一键启动，接水结束后通知本次消费与估算水量
 - 自动同步设备名称，支持设备别名、快捷移除和控制中心默认设备切换
 - 短信登录与账户管理：设备登录用于同步和启动设备、钱包充值及 App 端任务；补充积分登录可完成支付宝端任务并获得更多积分
 - 查看校园钱包余额，并通过支付宝完成充值
@@ -66,9 +66,7 @@ app/build/outputs/apk/release/app-release.apk
 ## 致谢与第三方项目
 
 - [miuix](https://github.com/compose-miuix-ui/miuix)：使用 `miuix-ui` 的下拉刷新组件和 `miuix-blur` 的模糊能力，并在应用内适配刷新布局与状态衔接；Apache-2.0 License。
-- [KernelSU](https://github.com/tiann/KernelSU) 与 [HyperCeiler](https://github.com/ReChronoRain/HyperCeiler)：仅作为界面层次、动效和材质风格的视觉参考，应用界面由本项目使用 Compose 原创实现，未复制其应用源码。
 - [QuickieExtended](https://github.com/T8RIN/QuickieExtended)：提供基于 CameraX 与 ML Kit 的二维码扫描能力；MIT License。
-- [ImageToolbox](https://github.com/T8RIN/ImageToolbox)：扫码技术路线的参考项目，未复制其源码；Apache-2.0 License。
 
 上述项目及其代码继续遵循各自的许可证，本项目的 MIT License 不替代其许可证。
 
