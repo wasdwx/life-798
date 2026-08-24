@@ -295,7 +295,7 @@ public class WaterService extends Service {
                 current,
                 "接水完成",
                 "本次消费 " + consumption.getMoneyText()
-                        + " · 水量约 " + consumption.getEstimatedWaterText() + "（估算）",
+                        + " · 水量约 " + consumption.getEstimatedWaterText(),
                 false
         );
     }

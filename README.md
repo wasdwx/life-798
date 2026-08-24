@@ -18,12 +18,12 @@ WaterWidget 是一个面向慧生活798用户的第三方 Android 设备控制�
 
 ## 运行环境
 
-- Android 8.0（API 26）及以上
+- Android 13（API 33）及以上
 - 仅提供 `arm64-v8a` 安装包，适用于现代 64 位 Android 设备
 
 ## 构建
 
-项目采用 Gradle Kotlin DSL、Gradle 8.13 与 JDK 17。源码通过 Gradle `sourceSets` 直接使用仓库根目录的 `src/main` 和 `src/test`。
+项目采用 Gradle Kotlin DSL、Gradle 9.5、JDK 21、Kotlin 2.4 和 Jetpack Compose。源码通过 Gradle `sourceSets` 直接使用仓库根目录的 `src/main` 和 `src/test`。
 
 ### 配置参数
 
@@ -62,6 +62,15 @@ app/build/outputs/apk/release/app-release.apk
 ## 隐私与数据
 
 应用的账户和设备配置保存在本机。请不要将设备控制登录信息、账户数据或二维码内容分享给他人。
+
+## 致谢与第三方项目
+
+- [miuix](https://github.com/compose-miuix-ui/miuix)：使用 `miuix-ui` 的下拉刷新组件和 `miuix-blur` 的模糊能力，并在应用内适配刷新布局与状态衔接；Apache-2.0 License。
+- [KernelSU](https://github.com/tiann/KernelSU) 与 [HyperCeiler](https://github.com/ReChronoRain/HyperCeiler)：仅作为界面层次、动效和材质风格的视觉参考，应用界面由本项目使用 Compose 原创实现，未复制其应用源码。
+- [QuickieExtended](https://github.com/T8RIN/QuickieExtended)：提供基于 CameraX 与 ML Kit 的二维码扫描能力；MIT License。
+- [ImageToolbox](https://github.com/T8RIN/ImageToolbox)：扫码技术路线的参考项目，未复制其源码；Apache-2.0 License。
+
+上述项目及其代码继续遵循各自的许可证，本项目的 MIT License 不替代其许可证。
 
 ## 免责声明
 

@@ -13,28 +13,27 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 
-private val DEFAULT_TASK_LOGS = emptyList<String>()
-
 data class DashboardUiState(
     val summary: DashboardSummaryUiState = DashboardUiStateFactory.from(null, 0),
     val accounts: List<DashboardAccountUiState> = emptyList(),
-    val tasks: TaskUiState = TaskUiStateFactory.from(emptyList(), false, 0, DEFAULT_TASK_LOGS)
+    val tasks: TaskUiState = TaskUiStateFactory.from(emptyList(), false, 0, emptyList()),
+    val homeRefreshing: Boolean = false,
+    val deviceSyncing: Boolean = false
 )
 
 class DashboardViewModel(application: Application) : AndroidViewModel(application) {
-    private val storeContext = application.applicationContext
     private val _uiState = MutableStateFlow(DashboardUiState())
     val uiState: StateFlow<DashboardUiState> = _uiState.asStateFlow()
 
     private var currentScore: Int? = null
     private var currentScoreLogs: JSONObject? = null
-    private var taskRun = TaskRunRepository.state.value
+    private var homeRefreshing = false
+    private var deviceSyncing = false
 
     init {
         reloadAccounts()
         viewModelScope.launch {
-            TaskRunRepository.state.collect { runState ->
-                taskRun = runState
+            TaskRunRepository.state.collect {
                 publish()
             }
         }
@@ -48,18 +47,24 @@ class DashboardViewModel(application: Application) : AndroidViewModel(applicatio
         publish()
     }
 
-    fun setCurrentScore(score: Int?) {
-        currentScore = score
-        publish()
-    }
-
     fun setCurrentScoreData(score: Int?, logs: JSONObject?) {
         currentScore = score
         currentScoreLogs = logs
         publish()
     }
 
+    fun setDeviceSyncing(syncing: Boolean) {
+        deviceSyncing = syncing
+        publish()
+    }
+
+    fun setHomeRefreshing(refreshing: Boolean) {
+        homeRefreshing = refreshing
+        publish()
+    }
+
     fun selectAccount(phone: String): Account? {
+        val storeContext = getApplication<Application>()
         val account = AccountStore.get(storeContext, phone) ?: return null
         AccountStore.setCurrent(storeContext, account.phone)
         currentScore = null
@@ -69,8 +74,10 @@ class DashboardViewModel(application: Application) : AndroidViewModel(applicatio
     }
 
     private fun publish() {
+        val storeContext = getApplication<Application>()
         val accounts = AccountStore.list(storeContext)
         val current = AccountStore.getCurrent(storeContext)
+        val taskRun = TaskRunRepository.state.value
         val usage = current?.let { account ->
             val accountKey = account.phone?.takeIf(String::isNotBlank)
                 ?: account.uid?.takeIf(String::isNotBlank)
@@ -92,7 +99,9 @@ class DashboardViewModel(application: Application) : AndroidViewModel(applicatio
                     taskRun.running,
                     taskRun.totalGained,
                     taskRun.logs
-                )
+                ),
+                homeRefreshing = homeRefreshing,
+                deviceSyncing = deviceSyncing
             )
         }
     }

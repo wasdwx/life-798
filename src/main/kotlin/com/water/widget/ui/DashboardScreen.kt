@@ -1,21 +1,42 @@
 package com.water.widget.ui
 
+import androidx.compose.animation.BoundsTransform
+import androidx.compose.animation.ExperimentalSharedTransitionApi
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.animateBounds
+import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.spring
 import androidx.compose.foundation.Image
-import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.overscroll
+import androidx.compose.foundation.pager.HorizontalPager
+import androidx.compose.foundation.pager.PagerState
+import androidx.compose.foundation.pager.rememberPagerState
+import androidx.compose.foundation.rememberOverscrollEffect
+import androidx.compose.foundation.selection.selectable
+import androidx.compose.foundation.withoutVisualEffect
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.asPaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.layout.statusBars
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -40,12 +61,9 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
-import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.NavigationBar
-import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
@@ -53,8 +71,10 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.layout.ContentScale
@@ -62,22 +82,38 @@ import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.RectangleShape
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.layout.LookaheadScope
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.tooling.preview.Preview
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.zIndex
 import com.water.widget.AppThemeMode
 import com.water.widget.BuildConfig
 import com.water.widget.R
+import kotlinx.coroutines.launch
+import top.yukonga.miuix.kmp.blur.BlendColorEntry
+import top.yukonga.miuix.kmp.blur.BlurColors
+import top.yukonga.miuix.kmp.blur.LayerBackdrop
+import top.yukonga.miuix.kmp.blur.layerBackdrop
+import top.yukonga.miuix.kmp.blur.rememberLayerBackdrop
+import top.yukonga.miuix.kmp.blur.textureBlur
+import kotlin.math.PI
+import kotlin.math.abs
+import kotlin.math.sin
 
-private enum class DashboardTab(val label: String) {
-    CONTROL("控制"),
-    TASK("任务"),
-    MINE("我的")
+private enum class DashboardTab(val label: String, val title: String) {
+    CONTROL("控制", "饮水控制中心"),
+    TASK("任务", "积分任务"),
+    MINE("我的", "我的")
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun DashboardScreen(
     state: DashboardUiState,
@@ -90,6 +126,7 @@ fun DashboardScreen(
     onWallet: () -> Unit,
     onSelectAccount: (String) -> Unit,
     onFetchDevices: () -> Unit,
+    onRefreshHome: () -> Unit,
     onAddDevice: () -> Unit,
     onEditDevice: (String, String) -> Unit,
     onRemoveDevice: (String) -> Unit,
@@ -98,45 +135,123 @@ fun DashboardScreen(
     modifier: Modifier = Modifier
 ) {
     val colors = MaterialTheme.colorScheme
-    var selectedTab by rememberSaveable { mutableStateOf(DashboardTab.CONTROL) }
+    val pagerState = rememberPagerState(
+        initialPage = DashboardTab.CONTROL.ordinal,
+        pageCount = { DashboardTab.entries.size }
+    )
+    val coroutineScope = rememberCoroutineScope()
+    val selectedTab = DashboardTab.entries[pagerState.currentPage]
+    val controlScrollState = rememberScrollState()
+    val taskScrollState = rememberScrollState()
+    val mineScrollState = rememberScrollState()
+    val mineOverscrollEffect = rememberOverscrollEffect()
+    val blurBackdrop = rememberLayerBackdrop {
+        drawRect(colors.background)
+        drawContent()
+    }
+    val pageTopPadding = WindowInsets.statusBars.asPaddingValues().calculateTopPadding() + 28.dp
+    val bottomContentPadding = 92.dp
     var showAccountSwitcher by rememberSaveable { mutableStateOf(false) }
     var showAppearanceSettings by rememberSaveable { mutableStateOf(false) }
     var showSupportDialog by rememberSaveable { mutableStateOf(false) }
 
-    Column(modifier = modifier.fillMaxSize().background(colors.background).statusBarsPadding()) {
-        Column(
+    Box(modifier = modifier.fillMaxSize().background(colors.background)) {
+        HorizontalPager(
+            state = pagerState,
             modifier = Modifier
-                .weight(1f)
-                .verticalScroll(rememberScrollState())
-                .padding(horizontal = 20.dp, vertical = 20.dp),
-            verticalArrangement = Arrangement.spacedBy(16.dp)
-        ) {
-            when (selectedTab) {
-                DashboardTab.CONTROL -> HomeTab(
-                    state = state.summary,
-                    onSwitchAccount = { showAccountSwitcher = true },
-                    onFetchDevices = onFetchDevices,
-                    onAddDevice = onAddDevice,
-                    onEditDevice = onEditDevice,
-                    onRemoveDevice = onRemoveDevice,
-                    onSelectDevice = onSelectDevice,
-                    onStartDevice = onStartDevice
-                )
-                DashboardTab.TASK -> TaskScreen(state = state.tasks, onRun = onRunTasks, modifier = Modifier.padding(0.dp))
-                DashboardTab.MINE -> MineTab(
-                    state = state.summary,
-                    onLogin = onLogin,
-                    onAccounts = onAccounts,
-                    onScores = onScores,
-                    onWallet = onWallet,
-                    themeMode = themeMode,
-                    onOpenAppearanceSettings = { showAppearanceSettings = true },
-                    onOpenSupport = { showSupportDialog = true }
-                )
+                .fillMaxSize()
+                .overscroll(mineOverscrollEffect)
+                .layerBackdrop(blurBackdrop)
+        ) { page ->
+            when (DashboardTab.entries[page]) {
+                DashboardTab.CONTROL -> {
+                    WaterPullRefresh(
+                        isRefreshing = state.homeRefreshing,
+                        onRefresh = onRefreshHome,
+                        modifier = Modifier.fillMaxSize(),
+                        indicatorTopOffset = pageTopPadding + 50.dp
+                    ) { pullOffset ->
+                        Column(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .verticalScroll(controlScrollState)
+                                .padding(start = 20.dp, top = pageTopPadding, end = 20.dp, bottom = bottomContentPadding),
+                            verticalArrangement = Arrangement.spacedBy(16.dp)
+                        ) {
+                            DashboardTitle(DashboardTab.CONTROL.title)
+                            Column(
+                                modifier = Modifier.offset(y = pullOffset),
+                                verticalArrangement = Arrangement.spacedBy(16.dp)
+                            ) {
+                                HomeTab(
+                                    state = state.summary,
+                                    syncing = state.deviceSyncing,
+                                    onSwitchAccount = { showAccountSwitcher = true },
+                                    onFetchDevices = onFetchDevices,
+                                    onAddDevice = onAddDevice,
+                                    onEditDevice = onEditDevice,
+                                    onRemoveDevice = onRemoveDevice,
+                                    onSelectDevice = onSelectDevice,
+                                    onStartDevice = onStartDevice
+                                )
+                                Spacer(Modifier.height(8.dp))
+                            }
+                        }
+                    }
+                }
+
+                DashboardTab.TASK -> {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .verticalScroll(taskScrollState)
+                            .padding(start = 20.dp, top = pageTopPadding, end = 20.dp, bottom = bottomContentPadding),
+                        verticalArrangement = Arrangement.spacedBy(16.dp)
+                    ) {
+                        DashboardTitle(DashboardTab.TASK.title)
+                        TaskScreen(state = state.tasks, onRun = onRunTasks)
+                        Spacer(Modifier.height(8.dp))
+                    }
+                }
+
+                DashboardTab.MINE -> {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .verticalScroll(
+                                state = mineScrollState,
+                                overscrollEffect = mineOverscrollEffect?.withoutVisualEffect()
+                            )
+                            .padding(start = 20.dp, top = pageTopPadding, end = 20.dp, bottom = bottomContentPadding),
+                        verticalArrangement = Arrangement.spacedBy(16.dp)
+                    ) {
+                        DashboardTitle(DashboardTab.MINE.title)
+                        MineTab(
+                            state = state.summary,
+                            onLogin = onLogin,
+                            onAccounts = onAccounts,
+                            onScores = onScores,
+                            onWallet = onWallet,
+                            themeMode = themeMode,
+                            onOpenAppearanceSettings = { showAppearanceSettings = true },
+                            onOpenSupport = { showSupportDialog = true }
+                        )
+                        Spacer(Modifier.height(8.dp))
+                    }
+                }
             }
-            Spacer(Modifier.height(8.dp))
         }
-        BottomTabs(selectedTab = selectedTab, onSelect = { selectedTab = it })
+        BottomTabs(
+            selectedTab = selectedTab,
+            pagerState = pagerState,
+            onSelect = { tab ->
+                coroutineScope.launch {
+                    pagerState.animateScrollToPage(tab.ordinal)
+                }
+            },
+            backdrop = blurBackdrop,
+            modifier = Modifier.align(Alignment.BottomCenter)
+        )
     }
 
     if (showAccountSwitcher) {
@@ -153,7 +268,7 @@ fun DashboardScreen(
         AppearanceSettingsDialog(
             mode = themeMode,
             onDismiss = { showAppearanceSettings = false },
-            onSelect = { mode ->
+            onModeSelect = { mode ->
                 showAppearanceSettings = false
                 onThemeModeChange(mode)
             }
@@ -167,6 +282,7 @@ fun DashboardScreen(
 @Composable
 private fun HomeTab(
     state: DashboardSummaryUiState,
+    syncing: Boolean,
     onSwitchAccount: () -> Unit,
     onFetchDevices: () -> Unit,
     onAddDevice: () -> Unit,
@@ -175,11 +291,11 @@ private fun HomeTab(
     onSelectDevice: (String) -> Unit,
     onStartDevice: (String) -> Unit
 ) {
-    Text("饮水控制中心", fontSize = 28.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurface)
     HeroCard(state = state, onSwitchAccount = onSwitchAccount)
     TodayOverviewCard(usage = state.usage)
     DeviceCard(
         state = state,
+        syncing = syncing,
         onFetchDevices = onFetchDevices,
         onAddDevice = onAddDevice,
         onEditDevice = onEditDevice,
@@ -190,60 +306,73 @@ private fun HomeTab(
 }
 
 @Composable
+private fun DashboardTitle(title: String) {
+    Text(
+        text = title,
+        color = MaterialTheme.colorScheme.onBackground,
+        fontSize = 28.sp,
+        fontWeight = FontWeight.Bold,
+        lineHeight = 34.sp,
+        maxLines = 1
+    )
+}
+
+@Composable
 private fun HeroCard(state: DashboardSummaryUiState, onSwitchAccount: () -> Unit) {
     val colors = MaterialTheme.colorScheme
+    val cardColor = colors.secondaryContainer
+    val contentColor = colors.onSecondaryContainer
     Card(
-        shape = RoundedCornerShape(28.dp),
-        colors = CardDefaults.cardColors(containerColor = Color.Transparent),
+        shape = RoundedCornerShape(30.dp),
+        colors = CardDefaults.cardColors(containerColor = cardColor),
         elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)
     ) {
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .background(Brush.linearGradient(listOf(colors.primary, colors.primary.copy(alpha = 0.78f))))
                 .padding(20.dp),
             verticalArrangement = Arrangement.spacedBy(18.dp)
         ) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Column(Modifier.weight(1f)) {
-                    Text("账号", color = colors.onPrimary.copy(alpha = 0.78f), fontSize = 12.sp)
-                    Text(state.accountTitle, color = colors.onPrimary, fontSize = 20.sp, fontWeight = FontWeight.Bold, maxLines = 1)
+                    Text("账号", color = contentColor.copy(alpha = 0.70f), fontSize = 12.sp)
+                    Text(state.accountTitle, color = contentColor, fontSize = 20.sp, fontWeight = FontWeight.Bold, maxLines = 1)
                     if (state.hasAccount) {
-                        Text(state.accountSubtitle, color = colors.onPrimary.copy(alpha = 0.72f), fontSize = 11.sp, maxLines = 1)
+                        Text(state.accountSubtitle, color = contentColor.copy(alpha = 0.66f), fontSize = 11.sp, maxLines = 1)
                     }
                 }
                 Surface(
                     onClick = onSwitchAccount,
                     shape = RoundedCornerShape(14.dp),
-                    color = colors.onPrimary.copy(alpha = 0.14f)
+                    color = colors.surface
                 ) {
                     Row(
                         modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Text("切换", color = colors.onPrimary, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
-                        Icon(Icons.Default.KeyboardArrowDown, contentDescription = "切换账号", tint = colors.onPrimary, modifier = Modifier.size(16.dp))
+                        Text("切换", color = contentColor, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                        Icon(Icons.Default.KeyboardArrowDown, contentDescription = "切换账号", tint = contentColor, modifier = Modifier.size(16.dp))
                     }
                 }
             }
             Surface(
                 shape = RoundedCornerShape(18.dp),
-                color = colors.onPrimary.copy(alpha = 0.12f),
+                color = colors.surface,
                 modifier = Modifier.fillMaxWidth()
             ) {
                 Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 14.dp)) {
-                    Text("可用积分", color = colors.onPrimary.copy(alpha = 0.76f), fontSize = 12.sp)
+                    Text("可用积分", color = contentColor.copy(alpha = 0.70f), fontSize = 12.sp)
                     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.Bottom) {
                         Text(
                             state.scoreTitle,
                             modifier = Modifier.weight(1f),
-                            color = colors.onPrimary,
+                            color = contentColor,
                             fontSize = 30.sp,
                             fontWeight = FontWeight.Bold,
                             maxLines = 1
                         )
                         if (state.hasAccount) {
-                        Text(state.scoreSubtitle, color = colors.onPrimary, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+                            Text(state.scoreSubtitle, color = contentColor, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
                         }
                     }
                 }
@@ -282,7 +411,11 @@ private fun UsageMetric(
     content: Color,
     modifier: Modifier = Modifier
 ) {
-    Surface(modifier = modifier, shape = RoundedCornerShape(18.dp), color = accent) {
+    Surface(
+        modifier = modifier,
+        shape = RoundedCornerShape(20.dp),
+        color = accent
+    ) {
         Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(5.dp)) {
             Text(label, color = content.copy(alpha = 0.78f), fontSize = 12.sp)
             Text(value, color = content, fontSize = 22.sp, fontWeight = FontWeight.Bold)
@@ -290,9 +423,11 @@ private fun UsageMetric(
     }
 }
 
+@OptIn(ExperimentalSharedTransitionApi::class)
 @Composable
 private fun DeviceCard(
     state: DashboardSummaryUiState,
+    syncing: Boolean,
     onFetchDevices: () -> Unit,
     onAddDevice: () -> Unit,
     onEditDevice: (String, String) -> Unit,
@@ -304,10 +439,19 @@ private fun DeviceCard(
     var editingDevice by remember { mutableStateOf<DeviceUiState?>(null) }
     var editedName by remember { mutableStateOf("") }
     var removingDevice by remember { mutableStateOf<DeviceUiState?>(null) }
+    var movingDownDeviceId by remember { mutableStateOf<String?>(null) }
+    val deviceBoundsTransform = remember {
+        BoundsTransform { _, _ ->
+            spring(
+                dampingRatio = Spring.DampingRatioNoBouncy,
+                stiffness = Spring.StiffnessMediumLow
+            )
+        }
+    }
     Card(
-        shape = RoundedCornerShape(24.dp),
+        shape = RoundedCornerShape(26.dp),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-        elevation = CardDefaults.cardElevation(defaultElevation = 1.dp)
+        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)
     ) {
         Column(Modifier.fillMaxWidth().padding(18.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -323,7 +467,7 @@ private fun DeviceCard(
                         fontSize = 12.sp
                     )
                 }
-                IconButton(onClick = onFetchDevices, enabled = state.hasAccount) {
+                IconButton(onClick = onFetchDevices, enabled = state.hasAccount && !syncing) {
                     Icon(Icons.Default.Refresh, contentDescription = "同步设备")
                 }
                 IconButton(onClick = onAddDevice, enabled = state.hasAccount) {
@@ -331,18 +475,43 @@ private fun DeviceCard(
                 }
             }
             Spacer(Modifier.height(12.dp))
-            state.devices.forEach { device ->
-                DeviceListItem(
-                    device = device,
-                    canStart = canStart,
-                    onSelect = { onSelectDevice(device.id) },
-                    onManage = {
-                        editingDevice = device
-                        editedName = device.name
-                    },
-                    onStart = { onStartDevice(device.id) }
-                )
-                Spacer(Modifier.height(10.dp))
+            LookaheadScope {
+                Column {
+                    state.devices.forEach { device ->
+                        key(device.id) {
+                            val layer = when {
+                                device.id == movingDownDeviceId -> 2f
+                                device.isControlCenterDevice -> 0f
+                                else -> 1f
+                            }
+                            DeviceListItem(
+                                device = device,
+                                canStart = canStart,
+                                modifier = Modifier
+                                    .zIndex(layer)
+                                    .animateBounds(
+                                        lookaheadScope = this@LookaheadScope,
+                                        modifier = Modifier.fillMaxWidth(),
+                                        boundsTransform = deviceBoundsTransform
+                                    ),
+                                onSelect = {
+                                    if (!device.isControlCenterDevice) {
+                                        movingDownDeviceId = state.devices
+                                            .firstOrNull(DeviceUiState::isControlCenterDevice)
+                                            ?.id
+                                    }
+                                    onSelectDevice(device.id)
+                                },
+                                onManage = {
+                                    editingDevice = device
+                                    editedName = device.name
+                                },
+                                onStart = { onStartDevice(device.id) }
+                            )
+                            Spacer(Modifier.height(10.dp))
+                        }
+                    }
+                }
             }
             if (!state.hasAccount || !state.hasAppToken || state.devices.isEmpty()) {
                 ConfigurationNotice(state = state)
@@ -402,27 +571,26 @@ private fun DeviceCard(
 private fun DeviceListItem(
     device: DeviceUiState,
     canStart: Boolean,
+    modifier: Modifier = Modifier,
     onSelect: () -> Unit,
     onManage: () -> Unit,
     onStart: () -> Unit
 ) {
     val colors = MaterialTheme.colorScheme
+    val containerColor by animateColorAsState(
+        targetValue = if (device.isControlCenterDevice) {
+            colors.primaryContainer
+        } else {
+            colors.surfaceVariant
+        },
+        label = "deviceCardColor"
+    )
     Card(
         onClick = onSelect,
-        modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(18.dp),
-        colors = CardDefaults.cardColors(
-            containerColor = if (device.isControlCenterDevice) {
-                colors.primaryContainer.copy(alpha = 0.55f)
-            } else {
-                colors.surfaceVariant
-            }
-        ),
-        border = BorderStroke(
-            if (device.isControlCenterDevice) 1.5.dp else 1.dp,
-            if (device.isControlCenterDevice) colors.primary
-            else colors.outlineVariant.copy(alpha = 0.65f)
-        )
+        modifier = modifier,
+        shape = RoundedCornerShape(20.dp),
+        colors = CardDefaults.cardColors(containerColor = containerColor),
+        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)
     ) {
         Row(
             modifier = Modifier.padding(14.dp),
@@ -501,7 +669,6 @@ private fun MineTab(
     onOpenAppearanceSettings: () -> Unit,
     onOpenSupport: () -> Unit
 ) {
-    TabHeader("我的", "账户、用水与应用设置")
     PersonalUsageSummary(usage = state.usage)
     InfoCard(title = state.accountTitle, subtitle = state.accountSubtitle) {
         StatusRow("账号数量", "${state.accountCount}")
@@ -523,7 +690,7 @@ private fun MineTab(
     SettingsRow(
         icon = Icons.Default.DarkMode,
         title = "外观设置",
-        subtitle = "${themeMode.label} · 夜间模式与显示偏好",
+        subtitle = themeMode.label,
         onClick = onOpenAppearanceSettings
     )
     SettingsRow(
@@ -564,7 +731,7 @@ private fun UsageSummaryItem(label: String, cost: String, water: String, modifie
 
 @Composable
 private fun SettingsRow(icon: androidx.compose.ui.graphics.vector.ImageVector, title: String, subtitle: String, onClick: () -> Unit) {
-    Surface(onClick = onClick, shape = RoundedCornerShape(22.dp), color = MaterialTheme.colorScheme.surface, tonalElevation = 1.dp, modifier = Modifier.fillMaxWidth()) {
+    Surface(onClick = onClick, shape = RoundedCornerShape(22.dp), color = MaterialTheme.colorScheme.surface, tonalElevation = 0.dp, modifier = Modifier.fillMaxWidth()) {
         Row(Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
             Box(Modifier.size(40.dp).clip(RoundedCornerShape(13.dp)).background(MaterialTheme.colorScheme.secondaryContainer), contentAlignment = Alignment.Center) {
                 Icon(icon, contentDescription = null, tint = MaterialTheme.colorScheme.onSecondaryContainer)
@@ -614,17 +781,21 @@ private fun AccountSwitcherDialog(accounts: List<DashboardAccountUiState>, onDis
 }
 
 @Composable
-private fun AppearanceSettingsDialog(mode: AppThemeMode, onDismiss: () -> Unit, onSelect: (AppThemeMode) -> Unit) {
+private fun AppearanceSettingsDialog(
+    mode: AppThemeMode,
+    onDismiss: () -> Unit,
+    onModeSelect: (AppThemeMode) -> Unit
+) {
     AlertDialog(
         onDismissRequest = onDismiss,
         icon = { Icon(Icons.Default.Palette, contentDescription = null, tint = MaterialTheme.colorScheme.primary) },
         title = { Text("外观设置", fontWeight = FontWeight.Bold) },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text("选择应用的显示模式", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 13.sp)
+                Text("显示模式", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 13.sp)
                 AppThemeMode.entries.forEach { item ->
                     Surface(
-                        onClick = { onSelect(item) },
+                        onClick = { onModeSelect(item) },
                         shape = RoundedCornerShape(15.dp),
                         color = if (item == mode) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceVariant,
                         modifier = Modifier.fillMaxWidth()
@@ -707,25 +878,147 @@ private fun SupportQrCode(label: String, imageRes: Int) {
 }
 
 @Composable
-private fun TabHeader(title: String, subtitle: String) {
-    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-        Text(title, fontSize = 28.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurface)
-        Text(subtitle, color = MaterialTheme.colorScheme.onSurfaceVariant)
+private fun BottomTabs(
+    selectedTab: DashboardTab,
+    pagerState: PagerState,
+    onSelect: (DashboardTab) -> Unit,
+    backdrop: LayerBackdrop,
+    modifier: Modifier = Modifier
+) {
+    val colors = MaterialTheme.colorScheme
+    Surface(
+        modifier = modifier
+            .fillMaxWidth()
+            .textureBlur(
+                backdrop = backdrop,
+                shape = RectangleShape,
+                blurRadius = 44f,
+                colors = BlurColors(
+                    blendColors = listOf(BlendColorEntry(colors.surface.copy(alpha = 0.64f)))
+                )
+            ),
+        shape = RectangleShape,
+        color = Color.Transparent,
+        contentColor = colors.onSurface,
+        tonalElevation = 0.dp,
+        shadowElevation = 0.dp
+    ) {
+        BoxWithConstraints(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(64.dp)
+        ) {
+            val itemWidth = maxWidth / DashboardTab.entries.size
+            val indicatorWidth = minOf(itemWidth - 16.dp, 64.dp)
+            Surface(
+                modifier = Modifier
+                    .align(Alignment.TopStart)
+                    .offset {
+                        val pagerPosition = (
+                            pagerState.currentPage + pagerState.currentPageOffsetFraction
+                        ).coerceIn(
+                            DashboardTab.CONTROL.ordinal.toFloat(),
+                            DashboardTab.MINE.ordinal.toFloat()
+                        )
+                        IntOffset(
+                            x = (itemWidth * pagerPosition + (itemWidth - indicatorWidth) / 2).roundToPx(),
+                            y = 5.dp.roundToPx()
+                        )
+                    }
+                    .width(indicatorWidth)
+                    .height(32.dp)
+                    .graphicsLayer {
+                        val pagerPosition = (
+                            pagerState.currentPage + pagerState.currentPageOffsetFraction
+                        ).coerceIn(
+                            DashboardTab.CONTROL.ordinal.toFloat(),
+                            DashboardTab.MINE.ordinal.toFloat()
+                        )
+                        val transitionPhase = abs(sin(PI * pagerPosition)).toFloat()
+                        scaleX = 1f - 0.18f * transitionPhase
+                        scaleY = 1f - 0.10f * transitionPhase
+                    },
+                shape = RoundedCornerShape(16.dp),
+                color = colors.secondaryContainer
+            ) {}
+            Row(modifier = Modifier.fillMaxSize()) {
+                BottomTab(
+                    tab = DashboardTab.CONTROL,
+                    selected = selectedTab == DashboardTab.CONTROL,
+                    icon = Icons.Default.Home,
+                    onClick = onSelect
+                )
+                BottomTab(
+                    tab = DashboardTab.TASK,
+                    selected = selectedTab == DashboardTab.TASK,
+                    icon = Icons.Default.CheckCircle,
+                    onClick = onSelect
+                )
+                BottomTab(
+                    tab = DashboardTab.MINE,
+                    selected = selectedTab == DashboardTab.MINE,
+                    icon = Icons.Default.Person,
+                    onClick = onSelect
+                )
+            }
+        }
     }
 }
 
 @Composable
-private fun BottomTabs(selectedTab: DashboardTab, onSelect: (DashboardTab) -> Unit, modifier: Modifier = Modifier) {
-    NavigationBar(modifier = modifier, containerColor = MaterialTheme.colorScheme.surface) {
-        NavigationBarItem(selected = selectedTab == DashboardTab.CONTROL, onClick = { onSelect(DashboardTab.CONTROL) }, icon = { Icon(Icons.Default.Home, contentDescription = null) }, label = { Text(DashboardTab.CONTROL.label) })
-        NavigationBarItem(selected = selectedTab == DashboardTab.TASK, onClick = { onSelect(DashboardTab.TASK) }, icon = { Icon(Icons.Default.CheckCircle, contentDescription = null) }, label = { Text(DashboardTab.TASK.label) })
-        NavigationBarItem(selected = selectedTab == DashboardTab.MINE, onClick = { onSelect(DashboardTab.MINE) }, icon = { Icon(Icons.Default.Person, contentDescription = null) }, label = { Text(DashboardTab.MINE.label) })
+private fun RowScope.BottomTab(
+    tab: DashboardTab,
+    selected: Boolean,
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    onClick: (DashboardTab) -> Unit
+) {
+    val colors = MaterialTheme.colorScheme
+    val interactionSource = remember { MutableInteractionSource() }
+    val contentColor by animateColorAsState(
+        if (selected) colors.onSecondaryContainer else colors.onSurfaceVariant,
+        label = "bottomTabContent"
+    )
+    Surface(
+        modifier = Modifier
+            .weight(1f)
+            .fillMaxHeight()
+            .selectable(
+                selected = selected,
+                interactionSource = interactionSource,
+                indication = null,
+                role = Role.Tab,
+                onClick = { onClick(tab) }
+            ),
+        shape = RectangleShape,
+        color = Color.Transparent,
+        contentColor = contentColor
+    ) {
+        Column(
+            modifier = Modifier.fillMaxSize(),
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            Spacer(Modifier.height(5.dp))
+            Box(Modifier.height(32.dp), contentAlignment = Alignment.Center) {
+                Icon(icon, contentDescription = tab.label, modifier = Modifier.size(19.dp))
+            }
+            Spacer(Modifier.height(2.dp))
+            Text(
+                text = tab.label,
+                fontSize = 11.sp,
+                lineHeight = 14.sp,
+                fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal
+            )
+        }
     }
 }
 
 @Composable
 private fun InfoCard(title: String, subtitle: String, content: @Composable ColumnScope.() -> Unit) {
-    Card(shape = RoundedCornerShape(24.dp), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface), elevation = CardDefaults.cardElevation(defaultElevation = 1.dp)) {
+    Card(
+        shape = RoundedCornerShape(26.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)
+    ) {
         Column(Modifier.fillMaxWidth().padding(18.dp)) {
             Text(title, fontSize = 18.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurface)
             if (subtitle.isNotBlank()) {
@@ -753,7 +1046,21 @@ private fun DashboardPreview() {
     WaterTheme {
         DashboardScreen(
             state = DashboardUiState(summary = DashboardSummaryUiState("测试账户", "设备控制已连接", "2380", "≈2.38元可用", true, true, true, 2, listOf(DeviceUiState("device-001", "一号饮水机"), DeviceUiState("device-002", "二号饮水机")))),
-            onLogin = {}, onAccounts = {}, themeMode = AppThemeMode.SYSTEM, onThemeModeChange = {}, onRunTasks = {}, onScores = {}, onWallet = {}, onSelectAccount = {}, onFetchDevices = {}, onAddDevice = {}, onEditDevice = { _, _ -> }, onRemoveDevice = {}, onSelectDevice = {}, onStartDevice = {}
+            onLogin = {},
+            onAccounts = {},
+            themeMode = AppThemeMode.SYSTEM,
+            onThemeModeChange = {},
+            onRunTasks = {},
+            onScores = {},
+            onWallet = {},
+            onSelectAccount = {},
+            onFetchDevices = {},
+            onRefreshHome = {},
+            onAddDevice = {},
+            onEditDevice = { _, _ -> },
+            onRemoveDevice = {},
+            onSelectDevice = {},
+            onStartDevice = {}
         )
     }
 }

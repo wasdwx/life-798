@@ -2,7 +2,6 @@ import java.util.Properties
 
 plugins {
     id("com.android.application")
-    id("org.jetbrains.kotlin.android")
     id("org.jetbrains.kotlin.plugin.compose")
 }
 
@@ -29,15 +28,15 @@ val apiCid = secretsProps.getProperty("API_CID", "")
 
 android {
     namespace = "com.water.widget"
-    compileSdk = 36
+    compileSdk = 37
 
     defaultConfig {
         applicationId = "com.water.widget"
         // 固定正式包名，所有本地与 CI 构建都保持一致；不要按 buildType 添加后缀。
-        minSdk = 26
+        minSdk = 33
         targetSdk = 35
-        versionCode = 16
-        versionName = "5.3.0"
+        versionCode = 17
+        versionName = "5.4.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
@@ -55,17 +54,24 @@ android {
     sourceSets {
         getByName("main") {
             manifest.srcFile("../src/main/AndroidManifest.xml")
-            java.srcDirs("../src/main/java", "../src/main/kotlin")
-            res.srcDirs("../src/main/res")
+            java.directories += "../src/main/java"
+            kotlin.directories += "../src/main/kotlin"
+            res.directories += "../src/main/res"
         }
         getByName("test") {
-            java.srcDirs("../src/test/kotlin")
+            kotlin.directories += "../src/test/kotlin"
         }
     }
 
     buildFeatures {
         compose = true
         buildConfig = true
+    }
+
+    packaging {
+        dex {
+            useLegacyPackaging = true
+        }
     }
 
     compileOptions {
@@ -95,7 +101,7 @@ android {
 }
 
 kotlin {
-    jvmToolchain(17)
+    jvmToolchain(21)
     compilerOptions {
         jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17)
     }
@@ -104,7 +110,7 @@ kotlin {
 dependencies {
     coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.5")
 
-    val composeBom = platform("androidx.compose:compose-bom:2025.06.01")
+    val composeBom = platform("androidx.compose:compose-bom:2026.05.01")
     implementation(composeBom)
     androidTestImplementation(composeBom)
 
@@ -112,12 +118,15 @@ dependencies {
     implementation("androidx.core:core-ktx:1.17.0")
     implementation("androidx.compose.material3:material3")
     implementation("androidx.compose.material:material-icons-extended")
+    implementation("androidx.compose.animation:animation")
     implementation("androidx.compose.ui:ui")
     implementation("androidx.compose.ui:ui-tooling-preview")
     implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.8.7")
     implementation("androidx.lifecycle:lifecycle-runtime-compose:2.8.7")
     implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.8.7")
     implementation("androidx.lifecycle:lifecycle-viewmodel-ktx:2.8.7")
+    implementation("top.yukonga.miuix.kmp:miuix-ui-android:0.9.3")
+    implementation("top.yukonga.miuix.kmp:miuix-blur-android:0.9.3")
     implementation("com.alipay.sdk:alipaysdk-android:15.8.16")
     // 与 ImageToolbox 相同的 CameraX + ML Kit 扫码路线；bundled 模型无需依赖 Google Play 服务。
     implementation("com.github.T8RIN.QuickieExtended:quickie-bundled:1.18.1")

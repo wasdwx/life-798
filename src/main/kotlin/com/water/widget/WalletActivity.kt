@@ -4,17 +4,19 @@ import android.content.Intent
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.asPaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBars
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
@@ -37,6 +39,9 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
@@ -44,11 +49,13 @@ import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.alipay.sdk.app.PayTask
+import com.water.widget.ui.PullRefreshOffsetContent
+import com.water.widget.ui.WaterPullRefresh
 import com.water.widget.ui.WaterTheme
 import java.util.Locale
 
 class WalletActivity : ComponentActivity() {
-    private var state = WalletUiState()
+    private var state by mutableStateOf(WalletUiState())
     private var hasLoaded = false
     private var lastAccountKey = ""
     @Volatile private var destroyed = false
@@ -81,7 +88,6 @@ class WalletActivity : ComponentActivity() {
                 accountName = account?.displayName().orEmpty(),
                 missingAppToken = true
             )
-            render()
             return
         }
 
@@ -89,10 +95,10 @@ class WalletActivity : ComponentActivity() {
             accountName = account.displayName(),
             missingAppToken = false,
             loading = true,
+            refreshing = true,
             errorMessage = null,
             statusMessage = null
         )
-        render()
         IlifeApi.walletOwnerWithToken(appToken) { response, error ->
             runOnUiThread {
                 if (!canContinue()) return@runOnUiThread
@@ -109,6 +115,7 @@ class WalletActivity : ComponentActivity() {
                     if (selectedWallet == null) {
                         state = state.copy(
                             loading = false,
+                            refreshing = false,
                             wallets = wallets,
                             selectedEndpointId = null,
                             selectedOwnerId = null,
@@ -117,7 +124,6 @@ class WalletActivity : ComponentActivity() {
                             statusMessage = messageAfterRefresh,
                             errorMessage = null
                         )
-                        render()
                     } else {
                         state = state.copy(
                             wallets = wallets,
@@ -151,10 +157,10 @@ class WalletActivity : ComponentActivity() {
             products = emptyList(),
             selectedProductId = null,
             loading = true,
+            refreshing = false,
             statusMessage = null,
             errorMessage = null
         )
-        render()
         loadProducts(appToken, wallet)
     }
 
@@ -169,10 +175,10 @@ class WalletActivity : ComponentActivity() {
                 try {
                     state = state.copy(
                         loading = false,
+                        refreshing = false,
                         products = WalletResponseParser.parseProducts(response),
                         errorMessage = null
                     )
-                    render()
                 } catch (e: IllegalArgumentException) {
                     showError(e.message ?: "充值产品响应格式错误")
                 }
@@ -187,8 +193,7 @@ class WalletActivity : ComponentActivity() {
             it.endpointId == state.selectedEndpointId && it.ownerId == state.selectedOwnerId
         } ?: return
         val product = state.products.firstOrNull { it.id == state.selectedProductId } ?: return
-        state = state.copy(loading = true, statusMessage = "正在创建充值订单…", errorMessage = null)
-        render()
+        state = state.copy(loading = true, refreshing = false, statusMessage = "正在创建充值订单…", errorMessage = null)
         IlifeApi.createRechargeOrderWithToken(
             appToken,
             wallet.endpointId,
@@ -212,7 +217,6 @@ class WalletActivity : ComponentActivity() {
 
     private fun requestAlipay(appToken: String, orderId: String) {
         state = state.copy(statusMessage = "正在打开支付宝…")
-        render()
         IlifeApi.prepayAlipayWithToken(appToken, orderId) { response, error ->
             runOnUiThread {
                 if (!canContinue()) return@runOnUiThread
@@ -245,10 +249,10 @@ class WalletActivity : ComponentActivity() {
                     AlipayResultKind.CANCELLED -> {
                         state = state.copy(
                             loading = false,
+                            refreshing = false,
                             statusMessage = result.message,
                             errorMessage = null
                         )
-                        render()
                     }
                     AlipayResultKind.FAILED -> showError(result.message)
                 }
@@ -257,8 +261,7 @@ class WalletActivity : ComponentActivity() {
     }
 
     private fun showError(message: String) {
-        state = state.copy(loading = false, statusMessage = null, errorMessage = message)
-        render()
+        state = state.copy(loading = false, refreshing = false, statusMessage = null, errorMessage = message)
     }
 
     private fun canContinue(): Boolean = !destroyed && !isFinishing
@@ -274,19 +277,15 @@ class WalletActivity : ComponentActivity() {
                     onSelectWallet = ::selectWallet,
                     onSelectProduct = { product ->
                         state = state.copy(selectedProductId = product.id, statusMessage = null)
-                        render()
                     },
                     onRequestRecharge = {
                         state = state.copy(showRechargeConfirmation = true)
-                        render()
                     },
                     onDismissRecharge = {
                         state = state.copy(showRechargeConfirmation = false)
-                        render()
                     },
                     onConfirmRecharge = {
                         state = state.copy(showRechargeConfirmation = false)
-                        render()
                         startRecharge()
                     }
                 )
@@ -299,6 +298,7 @@ private data class WalletUiState(
     val accountName: String = "",
     val missingAppToken: Boolean = false,
     val loading: Boolean = false,
+    val refreshing: Boolean = false,
     val wallets: List<RechargeWallet> = emptyList(),
     val selectedEndpointId: String? = null,
     val selectedOwnerId: String? = null,
@@ -325,132 +325,171 @@ private fun WalletScreen(
     onDismissRecharge: () -> Unit,
     onConfirmRecharge: () -> Unit
 ) {
+    val indicatorTopOffset = WindowInsets.statusBars.asPaddingValues().calculateTopPadding() + 72.dp
     Surface(
         modifier = Modifier.fillMaxSize(),
         color = MaterialTheme.colorScheme.background,
         contentColor = MaterialTheme.colorScheme.onBackground
     ) {
-        LazyColumn(
-            modifier = Modifier
-                .fillMaxSize()
-                .statusBarsPadding(),
-            contentPadding = PaddingValues(horizontal = 20.dp, vertical = 12.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp)
-        ) {
-        item {
-            Row(
+        WaterPullRefresh(
+            isRefreshing = state.refreshing,
+            onRefresh = { if (!state.loading) onRefresh() },
+            modifier = Modifier.fillMaxSize(),
+            indicatorTopOffset = indicatorTopOffset
+        ) { pullOffset ->
+            LazyColumn(
                 modifier = Modifier
-                    .fillMaxWidth()
-                    .heightIn(min = 52.dp),
-                verticalAlignment = Alignment.CenterVertically
+                    .fillMaxSize()
+                    .statusBarsPadding(),
+                contentPadding = PaddingValues(horizontal = 20.dp, vertical = 12.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp)
             ) {
-                IconButton(onClick = onBack, modifier = Modifier.size(44.dp)) {
-                    Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = "返回")
-                }
-                Spacer(Modifier.width(4.dp))
-                Column(verticalArrangement = Arrangement.spacedBy(1.dp)) {
-                    Text("钱包充值", fontSize = 22.sp, fontWeight = FontWeight.Bold)
-                    if (state.accountName.isNotBlank()) {
-                        Text(
-                            state.accountName,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            fontSize = 13.sp
-                        )
-                    }
-                }
-            }
-        }
-
-        if (state.loading) item { LinearProgressIndicator(Modifier.fillMaxWidth()) }
-
-        state.errorMessage?.let { message ->
-            item { MessageCard(message, error = true) }
-        }
-        state.statusMessage?.let { message ->
-            item { MessageCard(message, error = false) }
-        }
-
-        if (state.missingAppToken) {
-            item {
-                Card(shape = RoundedCornerShape(20.dp)) {
-                    Column(
-                        modifier = Modifier.padding(20.dp),
-                        verticalArrangement = Arrangement.spacedBy(12.dp)
-                    ) {
-                        Text("需要设备登录", fontWeight = FontWeight.Bold, fontSize = 18.sp)
-                        Text(
-                            "钱包与充值使用设备登录信息，请先在账户管理中为当前账号完成设备登录。",
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                        Button(onClick = onOpenAccounts) { Text("前往账户管理") }
-                    }
-                }
-            }
-        } else {
-            item {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Text("选择钱包", fontSize = 18.sp, fontWeight = FontWeight.Bold)
-                    Button(onClick = onRefresh, enabled = !state.loading) { Text("刷新") }
-                }
-            }
-
-            if (!state.loading && state.wallets.isEmpty()) {
-                item { Text("暂无可充值钱包", color = MaterialTheme.colorScheme.onSurfaceVariant) }
-            }
-
-            items(state.wallets) { wallet ->
-                WalletCard(
-                    wallet = wallet,
-                    selected = wallet.endpointId == state.selectedEndpointId &&
-                        wallet.ownerId == state.selectedOwnerId,
-                    enabled = !state.loading,
-                    onClick = { onSelectWallet(wallet) }
-                )
-            }
-
-            if (state.selectedEndpointId != null) {
                 item {
-                    Text("选择充值金额", fontSize = 18.sp, fontWeight = FontWeight.Bold)
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .heightIn(min = 52.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        IconButton(onClick = onBack, modifier = Modifier.size(44.dp)) {
+                            Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = "返回")
+                        }
+                        Spacer(Modifier.width(4.dp))
+                        Column(verticalArrangement = Arrangement.spacedBy(1.dp)) {
+                            Text("钱包充值", fontSize = 22.sp, fontWeight = FontWeight.Bold)
+                            if (state.accountName.isNotBlank()) {
+                                Text(
+                                    state.accountName,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    fontSize = 13.sp
+                                )
+                            }
+                        }
+                    }
                 }
-                if (!state.loading && state.products.isEmpty()) {
-                    item { Text("该钱包暂无充值产品", color = MaterialTheme.colorScheme.onSurfaceVariant) }
-                }
-                items(state.products) { product ->
-                    ProductCard(
-                        product = product,
-                        selected = product.id == state.selectedProductId,
-                        enabled = !state.loading,
-                        onClick = { onSelectProduct(product) }
-                    )
-                }
-            }
 
-            val selectedProduct = state.products.firstOrNull { it.id == state.selectedProductId }
-            item {
-                Button(
-                    onClick = onRequestRecharge,
-                    enabled = !state.loading && selectedProduct != null,
-                    modifier = Modifier.fillMaxWidth(),
-                    contentPadding = PaddingValues(vertical = 16.dp)
-                ) {
-                    if (state.loading) {
-                        CircularProgressIndicator(
-                            modifier = Modifier.size(20.dp),
-                            strokeWidth = 2.dp
-                        )
-                    } else {
-                        Text(
-                            selectedProduct?.let { "充值  ¥${it.price.money()}" }
-                                ?: "请选择充值金额"
-                        )
+                if (state.loading && !state.refreshing) {
+                    item {
+                        PullRefreshOffsetContent(pullOffset) {
+                            LinearProgressIndicator(Modifier.fillMaxWidth())
+                        }
+                    }
+                }
+
+                state.errorMessage?.let { message ->
+                    item {
+                        PullRefreshOffsetContent(pullOffset) {
+                            MessageCard(message, error = true)
+                        }
+                    }
+                }
+                state.statusMessage?.let { message ->
+                    item {
+                        PullRefreshOffsetContent(pullOffset) {
+                            MessageCard(message, error = false)
+                        }
+                    }
+                }
+
+                if (state.missingAppToken) {
+                    item {
+                        PullRefreshOffsetContent(pullOffset) {
+                            Card(
+                                shape = RoundedCornerShape(20.dp),
+                                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                                elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)
+                            ) {
+                                Column(
+                                    modifier = Modifier.padding(20.dp),
+                                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                                ) {
+                                    Text("需要设备登录", fontWeight = FontWeight.Bold, fontSize = 18.sp)
+                                    Text(
+                                        "钱包与充值使用设备登录信息，请先在账户管理中为当前账号完成设备登录。",
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                    Button(onClick = onOpenAccounts) { Text("前往账户管理") }
+                                }
+                            }
+                        }
+                    }
+                } else {
+                    item {
+                        PullRefreshOffsetContent(pullOffset) {
+                            Text("选择钱包", fontSize = 18.sp, fontWeight = FontWeight.Bold)
+                        }
+                    }
+
+                    if (!state.loading && state.wallets.isEmpty()) {
+                        item {
+                            PullRefreshOffsetContent(pullOffset) {
+                                Text("暂无可充值钱包", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            }
+                        }
+                    }
+
+                    items(state.wallets) { wallet ->
+                        PullRefreshOffsetContent(pullOffset) {
+                            WalletCard(
+                                wallet = wallet,
+                                selected = wallet.endpointId == state.selectedEndpointId &&
+                                    wallet.ownerId == state.selectedOwnerId,
+                                enabled = !state.loading,
+                                onClick = { onSelectWallet(wallet) }
+                            )
+                        }
+                    }
+
+                    if (state.selectedEndpointId != null) {
+                        item {
+                            PullRefreshOffsetContent(pullOffset) {
+                                Text("选择充值金额", fontSize = 18.sp, fontWeight = FontWeight.Bold)
+                            }
+                        }
+                        if (!state.loading && state.products.isEmpty()) {
+                            item {
+                                PullRefreshOffsetContent(pullOffset) {
+                                    Text("该钱包暂无充值产品", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                }
+                            }
+                        }
+                        items(state.products) { product ->
+                            PullRefreshOffsetContent(pullOffset) {
+                                ProductCard(
+                                    product = product,
+                                    selected = product.id == state.selectedProductId,
+                                    enabled = !state.loading,
+                                    onClick = { onSelectProduct(product) }
+                                )
+                            }
+                        }
+                    }
+
+                    val selectedProduct = state.products.firstOrNull { it.id == state.selectedProductId }
+                    item {
+                        PullRefreshOffsetContent(pullOffset) {
+                            Button(
+                                onClick = onRequestRecharge,
+                                enabled = !state.loading && selectedProduct != null,
+                                modifier = Modifier.fillMaxWidth(),
+                                contentPadding = PaddingValues(vertical = 16.dp)
+                            ) {
+                                if (state.loading) {
+                                    CircularProgressIndicator(
+                                        modifier = Modifier.size(20.dp),
+                                        strokeWidth = 2.dp
+                                    )
+                                } else {
+                                    Text(
+                                        selectedProduct?.let { "充值  ¥${it.price.money()}" }
+                                            ?: "请选择充值金额"
+                                    )
+                                }
+                            }
+                        }
                     }
                 }
             }
-        }
         }
     }
 
@@ -489,9 +528,9 @@ private fun WalletCard(
     onClick: () -> Unit
 ) {
     Card(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clickable(enabled = enabled, onClick = onClick),
+        onClick = onClick,
+        enabled = enabled,
+        modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(20.dp),
         colors = CardDefaults.cardColors(
             containerColor = if (selected) {
@@ -524,9 +563,9 @@ private fun ProductCard(
     onClick: () -> Unit
 ) {
     Card(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clickable(enabled = enabled, onClick = onClick),
+        onClick = onClick,
+        enabled = enabled,
+        modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(18.dp),
         colors = CardDefaults.cardColors(
             containerColor = if (selected) {

@@ -75,7 +75,8 @@ class ConfigActivity : ComponentActivity() {
                     onScores = { startActivity(Intent(this, ScoreActivity::class.java)) },
                     onWallet = { startActivity(Intent(this, WalletActivity::class.java)) },
                     onSelectAccount = { phone -> switchAccount(phone) },
-                    onFetchDevices = { fetchDevices(showFeedback = true) },
+                    onFetchDevices = { fetchDevices(showFeedback = true, showProgress = true) },
+                    onRefreshHome = ::refreshHome,
                     onAddDevice = { openAddDevice() },
                     onEditDevice = { deviceId, alias -> editDevice(deviceId, alias) },
                     onRemoveDevice = { deviceId -> removeDevice(deviceId) },
@@ -185,22 +186,42 @@ class ConfigActivity : ComponentActivity() {
         updateWidgets()
     }
 
-    private fun refreshCurrentScore() {
+    private fun refreshHome() {
+        var pendingRequests = 2
+        val onRequestComplete = {
+            pendingRequests--
+            if (pendingRequests == 0) viewModel.setHomeRefreshing(false)
+        }
+
+        viewModel.setHomeRefreshing(true)
+        refreshCurrentScore(onRequestComplete)
+        fetchDevices(showFeedback = false, showProgress = true, onComplete = onRequestComplete)
+    }
+
+    private fun refreshCurrentScore(onComplete: () -> Unit = {}) {
         val generation = ++scoreGeneration
         val account = AccountStore.getCurrent(this)
         val accountPhone = account?.phone
         val token = account?.token?.takeIf { it.isNotBlank() } ?: account?.appToken?.takeIf { it.isNotBlank() }
         if (account == null || token.isNullOrBlank()) {
             viewModel.setCurrentScoreData(null, null)
+            onComplete()
             return
         }
         IlifeApi.missionLstWithToken(token) { missionJson, _ ->
             IlifeApi.scoreLstWithToken(token) { scoreJson, _ ->
                 runOnUiThread {
-                    if (destroyed || generation != scoreGeneration) return@runOnUiThread
-                    if (AccountStore.getCurrent(this)?.phone != accountPhone) return@runOnUiThread
-                    val score = missionJson?.optJSONObject("data")?.optJSONObject("accScoreRsp")?.optInt("validScore")
-                    viewModel.setCurrentScoreData(score, scoreJson)
+                    if (destroyed) return@runOnUiThread
+                    if (
+                        generation == scoreGeneration &&
+                        AccountStore.getCurrent(this)?.phone == accountPhone
+                    ) {
+                        val score = missionJson?.optJSONObject("data")
+                            ?.optJSONObject("accScoreRsp")
+                            ?.optInt("validScore")
+                        viewModel.setCurrentScoreData(score, scoreJson)
+                    }
+                    onComplete()
                 }
             }
         }
@@ -253,58 +274,69 @@ class ConfigActivity : ComponentActivity() {
     }
 
     /** 拉取主页收藏设备列表；首次同步时自动选择第一台设备。 */
-    private fun fetchDevices(showFeedback: Boolean) {
+    private fun fetchDevices(
+        showFeedback: Boolean,
+        showProgress: Boolean = false,
+        onComplete: () -> Unit = {}
+    ) {
         val account = AccountStore.getCurrent(this)
         if (account == null || (!account.hasToken() && !account.hasAppToken())) {
             if (showFeedback) toast("请先登录")
+            onComplete()
             return
         }
 
         if (showFeedback) toast("正在同步设备…")
+        if (showProgress) viewModel.setDeviceSyncing(true)
         IlifeApi.master(this, object : IlifeApi.JsonCallback {
             override fun onResult(json: org.json.JSONObject?, err: String?) {
                 runOnUiThread {
                     if (destroyed) return@runOnUiThread
-                    if (json == null) {
-                        if (showFeedback) toast("同步失败：${err ?: "未知错误"}")
-                        return@runOnUiThread
-                    }
-
-                    val code = json.optInt("code", -999)
-                    when {
-                        code == -99 -> {
-                            if (showFeedback) toast("登录已过期，请重新登录")
+                    try {
+                        if (json == null) {
+                            if (showFeedback) toast("同步失败：${err ?: "未知错误"}")
                             return@runOnUiThread
                         }
-                        code != 0 -> {
-                            if (showFeedback) toast("同步失败：code=$code")
-                            return@runOnUiThread
-                        }
-                    }
 
-                    val favos = json.optJSONObject("data")?.optJSONArray("favos")
-                    if (favos == null || favos.length() == 0) {
-                        if (showFeedback) toast("暂无已收藏设备")
-                        return@runOnUiThread
-                    }
-
-                    val devices = mutableListOf<Pair<String, String>>()
-                    for (index in 0 until favos.length()) {
-                        favos.optJSONObject(index)?.let { device ->
-                            device.optString("id", "").takeIf(String::isNotBlank)?.let { id ->
-                                devices += id to device.optString("name", "")
+                        val code = json.optInt("code", -999)
+                        when {
+                            code == -99 -> {
+                                if (showFeedback) toast("登录已过期，请重新登录")
+                                return@runOnUiThread
+                            }
+                            code != 0 -> {
+                                if (showFeedback) toast("同步失败：code=$code")
+                                return@runOnUiThread
                             }
                         }
-                    }
-                    devices.asReversed().forEach { (id, name) -> account.rememberDevice(id, name) }
-                    if (account.selectedDeviceId().isBlank()) {
-                        devices.firstOrNull()?.first?.let(account::selectDevice)
-                    }
 
-                    AccountStore.updateCurrent(this@ConfigActivity, account)
-                    if (showFeedback) toast("已同步 ${devices.size} 台设备")
-                    viewModel.reloadAccounts()
-                    updateWidgets()
+                        val favos = json.optJSONObject("data")?.optJSONArray("favos")
+                        if (favos == null || favos.length() == 0) {
+                            if (showFeedback) toast("暂无已收藏设备")
+                            return@runOnUiThread
+                        }
+
+                        val devices = mutableListOf<Pair<String, String>>()
+                        for (index in 0 until favos.length()) {
+                            favos.optJSONObject(index)?.let { device ->
+                                device.optString("id", "").takeIf(String::isNotBlank)?.let { id ->
+                                    devices += id to device.optString("name", "")
+                                }
+                            }
+                        }
+                        devices.asReversed().forEach { (id, name) -> account.rememberDevice(id, name) }
+                        if (account.selectedDeviceId().isBlank()) {
+                            devices.firstOrNull()?.first?.let(account::selectDevice)
+                        }
+
+                        AccountStore.updateCurrent(this@ConfigActivity, account)
+                        if (showFeedback) toast("已同步 ${devices.size} 台设备")
+                        viewModel.reloadAccounts()
+                        updateWidgets()
+                    } finally {
+                        if (showProgress) viewModel.setDeviceSyncing(false)
+                        onComplete()
+                    }
                 }
             }
         })

@@ -1,6 +1,5 @@
 package com.water.widget.ui
 
-import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -18,8 +17,8 @@ import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -66,9 +65,9 @@ fun AccountsScreen(
         item { AccountsHero(accounts.size) }
         item {
             Card(
-                shape = RoundedCornerShape(24.dp),
+                shape = RoundedCornerShape(26.dp),
                 colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.55f))
+                elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)
             ) {
                 Column(
                     Modifier.fillMaxWidth().padding(18.dp),
@@ -81,7 +80,7 @@ fun AccountsScreen(
                         fontSize = 13.sp
                     )
                     Button(onClick = onSmsLogin, modifier = Modifier.fillMaxWidth()) { Text("短信登录 / 补充登录") }
-                    OutlinedButton(onClick = onAddToken, modifier = Modifier.fillMaxWidth()) { Text("手动添加登录信息") }
+                    FilledTonalButton(onClick = onAddToken, modifier = Modifier.fillMaxWidth()) { Text("手动添加登录信息") }
                 }
             }
         }
@@ -105,20 +104,17 @@ fun AccountsScreen(
 
 @Composable
 private fun AccountsHero(accountCount: Int) {
-    Card(
-        shape = RoundedCornerShape(28.dp),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer)
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 4.dp, vertical = 8.dp),
+        verticalArrangement = Arrangement.spacedBy(6.dp)
     ) {
-        Column(
-            modifier = Modifier.padding(20.dp),
-            verticalArrangement = Arrangement.spacedBy(6.dp)
-        ) {
-            Text("账户管理", fontSize = 28.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onPrimaryContainer)
-            Text(
-                if (accountCount == 0) "还没有保存账户，从下方开始添加。" else "已安全保存 $accountCount 个账户的登录信息。",
-                color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.78f)
-            )
-        }
+        Text("账户管理", fontSize = 28.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onBackground)
+        Text(
+            if (accountCount == 0) "还没有保存账户，从下方开始添加。" else "已安全保存 $accountCount 个账户的登录信息。",
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
     }
 }
 
@@ -127,8 +123,7 @@ private fun EmptyAccountsCard() {
     Surface(
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(24.dp),
-        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.55f),
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.55f))
+        color = MaterialTheme.colorScheme.surface
     ) {
         Column(
             modifier = Modifier.padding(horizontal = 20.dp, vertical = 28.dp),
@@ -157,13 +152,9 @@ private fun AccountCard(
     Card(
         shape = RoundedCornerShape(24.dp),
         colors = CardDefaults.cardColors(
-            containerColor = if (account.current) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surface
+            containerColor = if (account.current) MaterialTheme.colorScheme.secondaryContainer else MaterialTheme.colorScheme.surface
         ),
-        border = BorderStroke(
-            1.dp,
-            if (account.current) MaterialTheme.colorScheme.primary.copy(alpha = 0.5f) else MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.55f)
-        ),
-        elevation = CardDefaults.cardElevation(defaultElevation = if (account.current) 2.dp else 0.dp)
+        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)
     ) {
         Column(Modifier.fillMaxWidth().padding(18.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.Top) {
@@ -191,7 +182,7 @@ private fun AccountCard(
                 Button(onClick = { onSetCurrent(account.phone) }, enabled = !account.current, modifier = Modifier.weight(1f)) {
                     Text(if (account.current) "正在使用" else "设为当前")
                 }
-                OutlinedButton(onClick = { expanded = true }, modifier = Modifier.weight(1f)) { Text("更多设置") }
+                FilledTonalButton(onClick = { expanded = true }, modifier = Modifier.weight(1f)) { Text("更多设置") }
                 DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
                     DropdownMenuItem(text = { Text("复制积分登录信息") }, enabled = account.alipayToken.isNotBlank(), onClick = { expanded = false; onRevealToken(account.phone, false) })
                     DropdownMenuItem(text = { Text("复制设备登录信息") }, enabled = account.appToken.isNotBlank(), onClick = { expanded = false; onRevealToken(account.phone, true) })

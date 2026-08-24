@@ -1,9 +1,11 @@
 package com.water.widget
 
 import android.os.Bundle
-import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import com.water.widget.ui.ScoreDashboardScreen
 import com.water.widget.ui.ScoreUiState
 import com.water.widget.ui.ScoreUiStateFactory
@@ -14,26 +16,22 @@ import com.water.widget.ui.WaterTheme
  * 先复用现有服务端接口，后续可以继续扩展筛选、搜索与明细页。
  */
 class ScoreActivity : ComponentActivity() {
-    private var states: List<ScoreUiState> = emptyList()
-    private var refreshing = false
+    private var states by mutableStateOf<List<ScoreUiState>>(emptyList())
     private var refreshGeneration = 0
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         UI.applySystemBarAppearance(this, ThemeSettings.isDark(this))
+        render()
         refreshScores()
     }
 
     private fun refreshScores() {
         val generation = ++refreshGeneration
         val accounts = AccountStore.list(this).filter { it.hasToken() || it.hasAppToken() }
-        refreshing = accounts.isNotEmpty()
         states = accounts.map { ScoreUiStateFactory.loading(it) }
-        render()
 
         if (accounts.isEmpty()) {
-            refreshing = false
-            render()
             return
         }
         accounts.forEachIndexed { index, account -> loadAccountScore(generation, index, account) }
@@ -61,17 +59,13 @@ class ScoreActivity : ComponentActivity() {
         states = states.toMutableList().also { list ->
             if (index in list.indices) list[index] = state
         }
-        refreshing = states.any { !it.isReady && it.message == "正在刷新积分..." }
-        render()
     }
 
     private fun render() {
         setContent {
             WaterTheme(mode = ThemeSettings.mode(this)) {
-                ScoreDashboardScreen(states = states, refreshing = refreshing, onRefresh = {
-                    Toast.makeText(this, "正在刷新积分", Toast.LENGTH_SHORT).show()
-                    refreshScores()
-                })
+                val refreshing = states.any { !it.isReady && it.message == "正在刷新积分..." }
+                ScoreDashboardScreen(states = states, refreshing = refreshing, onRefresh = ::refreshScores)
             }
         }
     }

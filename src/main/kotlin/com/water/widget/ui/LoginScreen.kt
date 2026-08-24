@@ -1,7 +1,6 @@
 package com.water.widget.ui
 
 import android.graphics.Bitmap
-import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
@@ -30,7 +29,6 @@ import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -82,7 +80,6 @@ fun LoginScreen(
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Phone),
                 singleLine = true
             )
-            Spacer(Modifier.height(12.dp))
             Spacer(Modifier.height(12.dp))
             Row(
                 modifier = Modifier.fillMaxWidth(),
@@ -179,35 +176,32 @@ fun LoginScreen(
 
 @Composable
 private fun LoginHero(state: LoginUiState, onPlatformChange: (LoginPlatform) -> Unit) {
-    Card(
-        shape = RoundedCornerShape(28.dp),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer)
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 4.dp, vertical = 8.dp),
+        verticalArrangement = Arrangement.spacedBy(6.dp)
     ) {
-        Column(
-            modifier = Modifier.padding(20.dp),
-            verticalArrangement = Arrangement.spacedBy(6.dp)
-        ) {
-            Text("登录账户", fontSize = 28.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onPrimaryContainer)
-            Text(
-                "先完成设备登录才能使用设备；再补充积分登录，可获得更多积分。两项需分别登录。",
-                color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.78f)
-            )
-            Spacer(Modifier.height(6.dp))
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
-                LoginPlatform.entries.forEach { item ->
-                    if (item == state.platform) {
-                        Button(
-                            onClick = { onPlatformChange(item) },
-                            modifier = Modifier.weight(1f),
-                            shape = RoundedCornerShape(14.dp)
-                        ) { Text(item.title) }
-                    } else {
-                        OutlinedButton(
-                            onClick = { onPlatformChange(item) },
-                            modifier = Modifier.weight(1f),
-                            shape = RoundedCornerShape(14.dp)
-                        ) { Text(item.title) }
-                    }
+        Text("登录账户", fontSize = 28.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onBackground)
+        Text(
+            "先完成设备登录才能使用设备；再补充积分登录，可获得更多积分。两项需分别登录。",
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+        Spacer(Modifier.height(6.dp))
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+            LoginPlatform.entries.forEach { item ->
+                if (item == state.platform) {
+                    Button(
+                        onClick = { onPlatformChange(item) },
+                        modifier = Modifier.weight(1f),
+                        shape = RoundedCornerShape(14.dp)
+                    ) { Text(item.title) }
+                } else {
+                    FilledTonalButton(
+                        onClick = { onPlatformChange(item) },
+                        modifier = Modifier.weight(1f),
+                        shape = RoundedCornerShape(14.dp)
+                    ) { Text(item.title) }
                 }
             }
         }
@@ -217,10 +211,9 @@ private fun LoginHero(state: LoginUiState, onPlatformChange: (LoginPlatform) -> 
 @Composable
 private fun SectionCard(title: String, subtitle: String, content: @Composable ColumnScope.() -> Unit) {
     Card(
-        shape = RoundedCornerShape(24.dp),
+        shape = RoundedCornerShape(26.dp),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.55f)),
-        elevation = CardDefaults.cardElevation(defaultElevation = 1.dp)
+        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)
     ) {
         Column(Modifier.fillMaxWidth().padding(18.dp)) {
             Text(title, fontSize = 18.sp, fontWeight = FontWeight.Bold)
