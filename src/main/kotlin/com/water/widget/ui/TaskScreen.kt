@@ -21,7 +21,6 @@ import androidx.compose.material.icons.filled.Schedule
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.HorizontalDivider
@@ -52,11 +51,13 @@ fun TaskScreen(
     modifier: Modifier = Modifier
 ) {
     var onlyFailures by remember { mutableStateOf(false) }
-    val visibleLogs = if (onlyFailures) {
-        state.logs.filter { it.contains("❌") || it.contains("失败") || it.contains("错误") }
-    } else {
-        state.logs
-    }.takeLast(MAX_VISIBLE_TASK_LOGS)
+    val visibleLogs = remember(state.logs, onlyFailures) {
+        if (onlyFailures) {
+            state.logs.filter { it.contains("❌") || it.contains("失败") || it.contains("错误") }
+        } else {
+            state.logs
+        }.takeLast(MAX_VISIBLE_TASK_LOGS)
+    }
     val actionLabel = when {
         state.running -> "任务执行中"
         state.canRun -> "运行今日任务"
@@ -74,10 +75,7 @@ fun TaskScreen(
             elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)
         ) {
             Column(Modifier.fillMaxWidth().padding(18.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                    Text("今日任务", fontSize = 18.sp, fontWeight = FontWeight.SemiBold)
-                    if (state.running) CircularProgressIndicator(strokeWidth = 3.dp, modifier = Modifier.height(24.dp))
-                }
+                Text("今日任务", fontSize = 18.sp, fontWeight = FontWeight.SemiBold)
                 Text(
                     if (state.running) "正在执行…" else state.summary,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
