@@ -32,11 +32,13 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBars
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -150,7 +152,8 @@ fun DashboardScreen(
         drawContent()
     }
     val pageTopPadding = WindowInsets.statusBars.asPaddingValues().calculateTopPadding() + 28.dp
-    val bottomContentPadding = 92.dp
+    val bottomContentPadding = 92.dp +
+        WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
     var showAccountSwitcher by rememberSaveable { mutableStateOf(false) }
     var showAppearanceSettings by rememberSaveable { mutableStateOf(false) }
     var showSupportDialog by rememberSaveable { mutableStateOf(false) }
@@ -896,7 +899,8 @@ private fun BottomTabs(
                 colors = BlurColors(
                     blendColors = listOf(BlendColorEntry(colors.surface.copy(alpha = 0.64f)))
                 )
-            ),
+            )
+            .windowInsetsPadding(WindowInsets.navigationBars),
         shape = RectangleShape,
         color = Color.Transparent,
         contentColor = colors.onSurface,
