@@ -373,7 +373,9 @@ public class WaterService extends Service {
                 }
             }
         }
-        if (!posted) Toast.makeText(this, title + "：" + text, Toast.LENGTH_LONG).show();
+        // 需要用户处理的失败（如设备登录被拒绝）总是弹 Toast：
+        // 用户多半正停留在刚点过启动的主页，只发通知容易被忽略。
+        if (recovery || !posted) Toast.makeText(this, title + "：" + text, Toast.LENGTH_LONG).show();
     }
 
     private void updateWidget(int widgetId, String status) {
