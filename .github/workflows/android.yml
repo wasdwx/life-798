@@ -166,6 +166,13 @@ jobs:
           actual_cert_sha256="$(printf '%s\n' "$signer_output" | awk -F': ' '/Signer #1 certificate SHA-256 digest/ {print $2; exit}')"
           test "$actual_cert_sha256" = "$EXPECTED_RELEASE_CERT_SHA256"
 
+      - name: Preserve R8 mapping
+        uses: actions/upload-artifact@v4
+        with:
+          name: WaterWidget-${{ github.ref_name }}-r8-mapping
+          path: app/build/outputs/mapping/release/mapping.txt
+          if-no-files-found: error
+
       - name: Prepare release APK
         run: |
           apk_path="app/build/outputs/apk/release/app-release.apk"
