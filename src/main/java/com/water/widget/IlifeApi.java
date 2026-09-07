@@ -28,6 +28,8 @@ public class IlifeApi {
     static final String CID = BuildConfig.API_CID;
     private static final String SIGN_SALT = BuildConfig.SIGN_SALT;
     private static final String UA = "WaterWidget/" + BuildConfig.VERSION_NAME + " (Android)";
+    private static final String DEVICE_LOGIN_REJECTED_MESSAGE =
+            "设备登录信息未被接受，请检查是否填反或重新完成设备登录";
 
     public interface ImgCallback {
         void onResult(byte[] bytes, String err);
@@ -420,7 +422,7 @@ public class IlifeApi {
                 } else if (code == -99) {
                     cb.onResult(null, "TOKEN_EXPIRED");
                 } else if (code == -21) {
-                    cb.onResult(null, useApp ? msg : "需要设备控制登录信息，请先在账户中添加");
+                    cb.onResult(null, useApp ? DEVICE_LOGIN_REJECTED_MESSAGE : "需要设备控制登录信息，请先在账户中添加");
                 } else if (code == -88) {
                     cb.onResult(null, "未签约代扣协议，请在服务端完成签约后再使用");
                 } else if (code == -87) {
@@ -467,7 +469,7 @@ public class IlifeApi {
                 } else if (code == -99) {
                     cb.onResult(null, "TOKEN_EXPIRED");
                 } else if (code == -21) {
-                    cb.onResult(null, msg);
+                    cb.onResult(null, DEVICE_LOGIN_REJECTED_MESSAGE);
                 } else if (code == -88) {
                     cb.onResult(null, "未签约代扣协议，请在服务端完成签约后再使用");
                 } else if (code == -87) {

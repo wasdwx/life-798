@@ -35,8 +35,8 @@ android {
         // 固定正式包名，所有本地与 CI 构建都保持一致；不要按 buildType 添加后缀。
         minSdk = 33
         targetSdk = 35
-        versionCode = 17
-        versionName = "5.4.0"
+        versionCode = 18
+        versionName = "5.4.1"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
@@ -70,7 +70,7 @@ android {
 
     packaging {
         dex {
-            useLegacyPackaging = true
+            useLegacyPackaging = false
         }
     }
 
@@ -96,6 +96,12 @@ android {
             if (releaseSigningConfigured) {
                 signingConfig = signingConfigs.getByName("release")
             }
+            isMinifyEnabled = true
+            isShrinkResources = true
+            proguardFiles(
+                getDefaultProguardFile("proguard-android-optimize.txt"),
+                "proguard-rules.pro"
+            )
         }
     }
 }

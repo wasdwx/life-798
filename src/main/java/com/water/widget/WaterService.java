@@ -373,7 +373,8 @@ public class WaterService extends Service {
                 }
             }
         }
-        if (!posted) Toast.makeText(this, title + "：" + text, Toast.LENGTH_LONG).show();
+        // 需要用户处理的失败同时弹 Toast，避免停留在主页时漏看通知。
+        if (recovery || !posted) Toast.makeText(this, title + "：" + text, Toast.LENGTH_LONG).show();
     }
 
     private void updateWidget(int widgetId, String status) {
