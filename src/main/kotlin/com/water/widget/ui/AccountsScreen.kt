@@ -2,6 +2,7 @@ package com.water.widget.ui
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
@@ -90,6 +91,7 @@ fun AccountsScreen(
             item {
                 Text(
                     "已保存账户",
+                    color = MaterialTheme.colorScheme.onBackground,
                     fontSize = 16.sp,
                     fontWeight = FontWeight.Bold,
                     modifier = Modifier.padding(top = 2.dp)
@@ -182,12 +184,14 @@ private fun AccountCard(
                 Button(onClick = { onSetCurrent(account.phone) }, enabled = !account.current, modifier = Modifier.weight(1f)) {
                     Text(if (account.current) "正在使用" else "设为当前")
                 }
-                FilledTonalButton(onClick = { expanded = true }, modifier = Modifier.weight(1f)) { Text("更多设置") }
-                DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
-                    DropdownMenuItem(text = { Text("复制积分登录信息") }, enabled = account.alipayToken.isNotBlank(), onClick = { expanded = false; onRevealToken(account.phone, false) })
-                    DropdownMenuItem(text = { Text("复制设备登录信息") }, enabled = account.appToken.isNotBlank(), onClick = { expanded = false; onRevealToken(account.phone, true) })
-                    DropdownMenuItem(text = { Text("设置设备登录") }, onClick = { expanded = false; onSetAppToken(account.phone) })
-                    DropdownMenuItem(text = { Text("删除账户") }, onClick = { expanded = false; onDelete(account.phone) })
+                Box(Modifier.weight(1f)) {
+                    FilledTonalButton(onClick = { expanded = true }, modifier = Modifier.fillMaxWidth()) { Text("更多设置") }
+                    DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
+                        DropdownMenuItem(text = { Text("复制积分登录信息") }, enabled = account.alipayToken.isNotBlank(), onClick = { expanded = false; onRevealToken(account.phone, false) })
+                        DropdownMenuItem(text = { Text("复制设备登录信息") }, enabled = account.appToken.isNotBlank(), onClick = { expanded = false; onRevealToken(account.phone, true) })
+                        DropdownMenuItem(text = { Text("设置设备登录") }, onClick = { expanded = false; onSetAppToken(account.phone) })
+                        DropdownMenuItem(text = { Text("删除账户") }, onClick = { expanded = false; onDelete(account.phone) })
+                    }
                 }
             }
         }

@@ -1,6 +1,5 @@
 package com.water.widget
 
-import org.json.JSONArray
 import org.json.JSONObject
 
 enum class ImportedTokenPlatform { MAIN, APP, UNKNOWN }
@@ -34,10 +33,6 @@ data class TokenImportResolution(
 )
 
 object TokenImportResolver {
-    private val platformKeys = setOf(
-        "applicationtype", "apptype", "platform", "platformtype",
-        "clienttype", "channel", "source"
-    )
     private val phoneKeys = listOf("phone", "phoneNumber", "mobile", "un", "pn")
 
     fun inspect(token: String, probe: JSONObject?, requestError: String?): InspectedToken {
@@ -58,15 +53,7 @@ object TokenImportResolver {
             return InspectedToken(token, false, ImportedTokenPlatform.UNKNOWN, error = message)
         }
 
-        val platformSignals = linkedSetOf<ImportedTokenPlatform>()
-        listOfNotNull(viewMain, viewApp, missionMain, masterApp).forEach {
-            collectExplicitPlatformSignals(it, platformSignals)
-        }
-        missionPlatform(missionMain)?.let(platformSignals::add)
-        if (mainValid.xor(appValid)) {
-            platformSignals += if (mainValid) ImportedTokenPlatform.MAIN else ImportedTokenPlatform.APP
-        }
-        val platform = platformSignals.singleOrNull() ?: ImportedTokenPlatform.UNKNOWN
+        val platform = missionPlatform(missionMain)
 
         val data = listOf(viewMain, viewApp)
             .firstNotNullOfOrNull { response ->
@@ -126,7 +113,7 @@ object TokenImportResolver {
             if (detected != ImportedTokenPlatform.UNKNOWN &&
                 detected !in candidate.requestedPlatforms
             ) {
-                notices += "登录信息位置已自动纠正"
+                notices += "设备与积分登录信息的位置已自动调整"
             }
         }
 
@@ -147,14 +134,16 @@ object TokenImportResolver {
         var mainToken = choose(ImportedTokenPlatform.MAIN)
         var appToken = choose(ImportedTokenPlatform.APP)
         candidates.filter { it.inspection.platform == ImportedTokenPlatform.UNKNOWN }.forEach { candidate ->
+            notices += "部分登录信息的用途暂时无法确认，请核对填写位置"
             when {
                 ImportedTokenPlatform.MAIN in candidate.requestedPlatforms && mainToken.isBlank() ->
                     mainToken = candidate.inspection.token
                 ImportedTokenPlatform.APP in candidate.requestedPlatforms && appToken.isBlank() ->
                     appToken = candidate.inspection.token
-                mainToken.isBlank() -> mainToken = candidate.inspection.token
-                appToken.isBlank() -> appToken = candidate.inspection.token
-                else -> notices += "无法区分的重复登录信息已忽略"
+                else -> return TokenImportResolution(
+                    false,
+                    error = "部分登录信息的用途无法确认，不能自动调整，请核对填写位置后重试"
+                )
             }
         }
 
@@ -191,55 +180,26 @@ object TokenImportResolver {
         return ""
     }
 
-    private fun collectExplicitPlatformSignals(value: Any?, out: MutableSet<ImportedTokenPlatform>) {
-        when (value) {
-            is JSONObject -> {
-                val keys = value.keys()
-                while (keys.hasNext()) {
-                    val key = keys.next()
-                    val child = value.opt(key)
-                    if (key.lowercase().replace("_", "") in platformKeys) {
-                        platformFromValue(child)?.let(out::add)
-                    }
-                    collectExplicitPlatformSignals(child, out)
-                }
+    private fun missionPlatform(json: JSONObject?): ImportedTokenPlatform {
+        if (!json.isSuccess()) return ImportedTokenPlatform.UNKNOWN
+        val missions = json?.optJSONObject("data")?.optJSONArray("missions")
+            ?: return ImportedTokenPlatform.UNKNOWN
+        var platforms = setOf(1, 5)
+        for (index in 0 until missions.length()) {
+            val types = missions.optJSONObject(index)?.optJSONArray("stype")
+                ?: return ImportedTokenPlatform.UNKNOWN
+            val applicable = (0 until types.length()).map {
+                types.opt(it) as? Int ?: return ImportedTokenPlatform.UNKNOWN
+            }.toSet()
+            if (applicable.isEmpty() || applicable.any { it !in setOf(1, 5) }) {
+                return ImportedTokenPlatform.UNKNOWN
             }
-            is JSONArray -> for (index in 0 until value.length()) {
-                collectExplicitPlatformSignals(value.opt(index), out)
-            }
+            platforms = platforms.intersect(applicable)
         }
-    }
-
-    private fun platformFromValue(value: Any?): ImportedTokenPlatform? {
-        val text = value?.toString()?.trim()?.lowercase().orEmpty()
-        return when {
-            text == "1,1" || text == "app" || text.contains("android") ||
-                text.contains("official") || text.contains("客户端") -> ImportedTokenPlatform.APP
-            text == "1,5" || text.contains("alipay") || text.contains("支付宝") ||
-                text.contains("mini") || text.contains("小程序") -> ImportedTokenPlatform.MAIN
-            else -> null
-        }
-    }
-
-    private fun missionPlatform(json: JSONObject?): ImportedTokenPlatform? {
-        val missions = json?.optJSONObject("data")?.optJSONArray("missions") ?: return null
-        val names = buildString {
-            for (index in 0 until missions.length()) {
-                val item = missions.optJSONObject(index) ?: continue
-                append(' ')
-                append(item.optString("name"))
-                append(' ')
-                append(item.optString("title"))
-                append(' ')
-                append(item.optString("refId"))
-            }
-        }.lowercase()
-        val hasApp = listOf("官方app", "app端", "客户端", "android").any(names::contains)
-        val hasMain = listOf("支付宝", "小程序", "生活号", "alipay").any(names::contains)
-        return when {
-            hasApp && !hasMain -> ImportedTokenPlatform.APP
-            hasMain && !hasApp -> ImportedTokenPlatform.MAIN
-            else -> null
+        return when (platforms.singleOrNull()) {
+            1 -> ImportedTokenPlatform.APP
+            5 -> ImportedTokenPlatform.MAIN
+            else -> ImportedTokenPlatform.UNKNOWN
         }
     }
 }
