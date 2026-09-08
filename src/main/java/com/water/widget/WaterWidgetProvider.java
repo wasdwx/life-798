@@ -57,6 +57,9 @@ public class WaterWidgetProvider extends AppWidgetProvider {
     static RemoteViews buildViews(Context context, int widgetId, String status) {
         boolean configured = WaterApi.isConfigured(context);
         RemoteViews views = new RemoteViews(context.getPackageName(), R.layout.widget_water);
+        // 经典小部件只吃不透明度，渐变大按钮不做颜色自定义
+        WidgetSupport.tintSurface(views, context, R.color.widget_bg,
+                ThemeSettings.INSTANCE.widgetStyle(context).getOpacity());
 
         if (!configured) {
             // 未配置：整个小部件点击打开主页

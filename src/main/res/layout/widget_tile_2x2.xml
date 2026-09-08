@@ -1,0 +1,52 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 方块小部件 2×2 及更大档：竖排图标、动作名、状态行。默认值仅供预览，见 widget_tile_1x1。 -->
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools"
+    android:id="@android:id/background"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent">
+
+    <LinearLayout
+        android:id="@+id/tile_card"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:orientation="vertical"
+        android:gravity="center"
+        android:background="@drawable/btn_device_tonal"
+        android:foreground="@drawable/widget_press_ripple"
+        android:padding="12dp">
+
+        <ImageView
+            android:id="@+id/tile_icon"
+            android:layout_width="36dp"
+            android:layout_height="36dp"
+            android:src="@drawable/ic_water_drop"
+            android:tint="@color/widget_on_device_container"
+            tools:ignore="ContentDescription,UseAppTint" />
+
+        <TextView
+            android:id="@+id/tile_title"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:text="启动设备"
+            android:textSize="15sp"
+            android:textStyle="bold"
+            android:textColor="@color/widget_on_device_container"
+            android:gravity="center"
+            android:singleLine="true" />
+
+        <TextView
+            android:id="@+id/tile_status"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="3dp"
+            android:text="待机"
+            android:textSize="11sp"
+            android:textColor="@color/widget_on_device_container"
+            android:alpha="0.72"
+            android:gravity="center"
+            android:singleLine="true"
+            android:ellipsize="end" />
+    </LinearLayout>
+</FrameLayout>

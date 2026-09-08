@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 启动设备的 M3 淡色块，也是启动器预览里的默认色。运行时颜色与不透明度由
+     WidgetSupport.tintButton 用 backgroundTint 覆盖；按压反馈见 widget_press_ripple。 -->
+<shape xmlns:android="http://schemas.android.com/apk/res/android"
+    android:shape="rectangle">
+    <solid android:color="@color/widget_device_container" />
+    <corners android:radius="18dp" />
+</shape>

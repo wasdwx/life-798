@@ -1,0 +1,157 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 宽条组合 4×2：顶部一行设备名 + 今日用水，下方左右两个按钮各自带状态第二行。
+     没有独立状态行 —— 操作状态直接写进按钮，避免信息拥挤。
+     根布局用 @android:id/background 让 HyperOS 正确裁圆角。 -->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools"
+    android:id="@android:id/background"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="vertical"
+    android:background="@drawable/widget_surface_bg"
+    android:padding="12dp">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:gravity="center_vertical"
+        android:layout_marginBottom="9dp"
+        android:layout_marginStart="2dp"
+        android:layout_marginEnd="2dp">
+
+        <TextView
+            android:id="@+id/combo_device_name"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:text="未配置设备"
+            android:textSize="13sp"
+            android:textStyle="bold"
+            android:textColor="@color/widget_on_surface"
+            android:singleLine="true"
+            android:ellipsize="end" />
+
+        <TextView
+            android:id="@+id/combo_usage_text"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="8dp"
+            android:text="今日暂无用水"
+            android:textSize="11sp"
+            android:textColor="@color/widget_on_surface_variant"
+            android:singleLine="true"
+            android:ellipsize="end" />
+    </LinearLayout>
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1"
+        android:orientation="horizontal">
+
+        <LinearLayout
+            android:id="@+id/combo_btn_device"
+            android:layout_width="0dp"
+            android:layout_height="match_parent"
+            android:layout_weight="1"
+            android:layout_marginEnd="5dp"
+            android:orientation="horizontal"
+            android:gravity="center"
+            android:paddingStart="12dp"
+            android:paddingEnd="10dp"
+            android:background="@drawable/btn_device_tonal"
+            android:foreground="@drawable/widget_press_ripple">
+
+            <ImageView
+                android:id="@+id/combo_icon_device"
+                android:layout_width="22dp"
+                android:layout_height="22dp"
+                android:layout_marginEnd="9dp"
+                android:src="@drawable/ic_water_drop"
+                android:tint="@color/widget_on_device_container"
+                tools:ignore="ContentDescription,UseAppTint" />
+
+            <LinearLayout
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:orientation="vertical">
+
+                <TextView
+                    android:id="@+id/combo_title_device"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="启动设备"
+                    android:textSize="14sp"
+                    android:textStyle="bold"
+                    android:textColor="@color/widget_on_device_container"
+                    android:singleLine="true"
+                    android:ellipsize="end" />
+
+                <TextView
+                    android:id="@+id/combo_device_status"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="待机"
+                    android:textSize="11sp"
+                    android:textColor="@color/widget_on_device_container"
+                    android:alpha="0.72"
+                    android:singleLine="true"
+                    android:ellipsize="end" />
+            </LinearLayout>
+        </LinearLayout>
+
+        <LinearLayout
+            android:id="@+id/combo_btn_task"
+            android:layout_width="0dp"
+            android:layout_height="match_parent"
+            android:layout_weight="1"
+            android:layout_marginStart="5dp"
+            android:orientation="horizontal"
+            android:gravity="center"
+            android:paddingStart="12dp"
+            android:paddingEnd="10dp"
+            android:background="@drawable/btn_task_tonal"
+            android:foreground="@drawable/widget_press_ripple">
+
+            <ImageView
+                android:id="@+id/combo_icon_task"
+                android:layout_width="22dp"
+                android:layout_height="22dp"
+                android:layout_marginEnd="9dp"
+                android:src="@drawable/ic_task_star"
+                android:tint="@color/widget_on_task_container"
+                tools:ignore="ContentDescription,UseAppTint" />
+
+            <LinearLayout
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:orientation="vertical">
+
+                <TextView
+                    android:id="@+id/combo_title_task"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="积分任务"
+                    android:textSize="14sp"
+                    android:textStyle="bold"
+                    android:textColor="@color/widget_on_task_container"
+                    android:singleLine="true"
+                    android:ellipsize="end" />
+
+                <TextView
+                    android:id="@+id/combo_task_status"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="--"
+                    android:textSize="11sp"
+                    android:textColor="@color/widget_on_task_container"
+                    android:alpha="0.72"
+                    android:singleLine="true"
+                    android:ellipsize="end" />
+            </LinearLayout>
+        </LinearLayout>
+    </LinearLayout>
+</LinearLayout>

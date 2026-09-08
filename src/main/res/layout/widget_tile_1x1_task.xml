@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 积分任务小部件的初始与预览布局：与 widget_tile_1x1 完全同构，只换图标和默认色。
+     运行时 Provider 对两者写入的内容一致，这个文件只为让选择器里的预览是对的。 -->
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools"
+    android:id="@android:id/background"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent">
+
+    <LinearLayout
+        android:id="@+id/tile_card"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:orientation="vertical"
+        android:gravity="center"
+        android:background="@drawable/btn_task_tonal"
+        android:foreground="@drawable/widget_press_ripple"
+        android:padding="6dp">
+
+        <ImageView
+            android:id="@+id/tile_icon"
+            android:layout_width="26dp"
+            android:layout_height="26dp"
+            android:src="@drawable/ic_task_star"
+            android:tint="@color/widget_on_task_container"
+            tools:ignore="ContentDescription,UseAppTint" />
+
+        <TextView
+            android:id="@+id/tile_status"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="3dp"
+            android:text="--"
+            android:textSize="10sp"
+            android:textColor="@color/widget_on_task_container"
+            android:alpha="0.8"
+            android:gravity="center"
+            android:singleLine="true"
+            android:ellipsize="end" />
+    </LinearLayout>
+</FrameLayout>

@@ -96,6 +96,7 @@ public class AccountStore {
 
     public static void setCurrent(Context ctx, String phone) {
         sp(ctx).edit().putString(KEY_CURRENT, phone).apply();
+        WidgetSupport.refreshAll(ctx);
     }
 
     /** 从旧版 water_cfg（单 token + dids）迁移为第一个账户。仅执行一次。 */
@@ -123,6 +124,9 @@ public class AccountStore {
         JSONArray arr = new JSONArray();
         for (Account a : all) arr.put(a.toJson());
         sp(ctx).edit().putString(KEY_LIST, arr.toString()).apply();
+        // 账户/设备/积分余额都存在这份列表里，这里是唯一的写出口。
+        // 不在这儿通知，桌面小部件就得等到下次被点击才知道设备变了。
+        WidgetSupport.refreshAll(ctx);
     }
 
     private static SharedPreferences sp(Context ctx) {

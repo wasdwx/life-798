@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 积分任务的 M3 淡色块，同 btn_device_tonal。 -->
+<shape xmlns:android="http://schemas.android.com/apk/res/android"
+    android:shape="rectangle">
+    <solid android:color="@color/widget_task_container" />
+    <corners android:radius="18dp" />
+</shape>

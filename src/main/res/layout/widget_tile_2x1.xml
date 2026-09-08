@@ -1,0 +1,42 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 方块小部件 2×1 档：横排图标加一行文字。高度只够一行，所以空闲显示动作名、
+     运行中显示状态，与组合小部件 4×1 同一逻辑。默认值仅供预览，见 widget_tile_1x1。 -->
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools"
+    android:id="@android:id/background"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent">
+
+    <LinearLayout
+        android:id="@+id/tile_card"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:orientation="horizontal"
+        android:gravity="center"
+        android:background="@drawable/btn_device_tonal"
+        android:foreground="@drawable/widget_press_ripple"
+        android:paddingStart="12dp"
+        android:paddingEnd="12dp">
+
+        <ImageView
+            android:id="@+id/tile_icon"
+            android:layout_width="20dp"
+            android:layout_height="20dp"
+            android:layout_marginEnd="8dp"
+            android:src="@drawable/ic_water_drop"
+            android:tint="@color/widget_on_device_container"
+            tools:ignore="ContentDescription,UseAppTint" />
+
+        <TextView
+            android:id="@+id/tile_title"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:text="启动设备"
+            android:textSize="13sp"
+            android:textStyle="bold"
+            android:textColor="@color/widget_on_device_container"
+            android:singleLine="true"
+            android:ellipsize="end" />
+    </LinearLayout>
+</FrameLayout>

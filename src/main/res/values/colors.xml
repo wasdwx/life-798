@@ -1,7 +1,21 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
+    <!-- 原版小部件沿用的旧色名，保持不动 -->
     <color name="widget_bg">#ffffff</color>
     <color name="widget_title">#2c3e50</color>
     <color name="widget_status_text">#95a5a6</color>
     <color name="bg_main">#f5f6f8</color>
+
+    <!-- 新增小部件：取自 WaterTheme 的 M3 配色，与应用内观感一致 -->
+    <color name="widget_surface">#FCFEFE</color>
+    <color name="widget_on_surface">#14262B</color>
+    <color name="widget_on_surface_variant">#405258</color>
+
+    <color name="widget_device_container">#D0F4FA</color>
+    <color name="widget_on_device_container">#003640</color>
+
+    <color name="widget_task_container">#FFE39C</color>
+    <color name="widget_on_task_container">#2B1B00</color>
+
+    <color name="widget_ripple">#1F000000</color>
 </resources>

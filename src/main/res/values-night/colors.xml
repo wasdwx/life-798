@@ -4,4 +4,16 @@
     <color name="widget_title">#ffffff</color>
     <color name="widget_status_text">#9e9e9e</color>
     <color name="bg_main">#1a1a1a</color>
+
+    <color name="widget_surface">#102025</color>
+    <color name="widget_on_surface">#E5F0F2</color>
+    <color name="widget_on_surface_variant">#B7C8CC</color>
+
+    <color name="widget_device_container">#174F5B</color>
+    <color name="widget_on_device_container">#D0F4FA</color>
+
+    <color name="widget_task_container">#624400</color>
+    <color name="widget_on_task_container">#FFE39C</color>
+
+    <color name="widget_ripple">#33FFFFFF</color>
 </resources>

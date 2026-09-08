@@ -48,7 +48,13 @@ class ScoreActivity : ComponentActivity() {
             IlifeApi.scoreLstWithToken(token) { scoreJson, scoreErr ->
                 runOnUiThread {
                     val error = missionErr ?: scoreErr
-                    updateState(generation, index, ScoreUiStateFactory.from(account, missionJson, scoreJson, error))
+                    val state = ScoreUiStateFactory.from(account, missionJson, scoreJson, error)
+                    if (state.validScore > 0 && state.validScore != account.score) {
+                        // 顺手缓存，供桌面小部件离线展示（AccountStore 落盘时会通知小部件刷新）
+                        account.score = state.validScore
+                        AccountStore.addOrUpdateKeepingCurrent(this, account)
+                    }
+                    updateState(generation, index, state)
                 }
             }
         }

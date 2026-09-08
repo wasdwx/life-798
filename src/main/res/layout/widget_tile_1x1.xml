@@ -1,0 +1,42 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 方块小部件 1×1 档：只有图标和一行极短状态，整块即按钮。
+     根节点只保留 @android:id/background 供启动器裁圆角；图标、文字、配色由
+     WidgetSupport.tileViews 写入，XML 里的是启动器预览用的默认值（启动设备）。 -->
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools"
+    android:id="@android:id/background"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent">
+
+    <LinearLayout
+        android:id="@+id/tile_card"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:orientation="vertical"
+        android:gravity="center"
+        android:background="@drawable/btn_device_tonal"
+        android:foreground="@drawable/widget_press_ripple"
+        android:padding="6dp">
+
+        <ImageView
+            android:id="@+id/tile_icon"
+            android:layout_width="26dp"
+            android:layout_height="26dp"
+            android:src="@drawable/ic_water_drop"
+            android:tint="@color/widget_on_device_container"
+            tools:ignore="ContentDescription,UseAppTint" />
+
+        <TextView
+            android:id="@+id/tile_status"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="3dp"
+            android:text="待机"
+            android:textSize="10sp"
+            android:textColor="@color/widget_on_device_container"
+            android:alpha="0.8"
+            android:gravity="center"
+            android:singleLine="true"
+            android:ellipsize="end" />
+    </LinearLayout>
+</FrameLayout>

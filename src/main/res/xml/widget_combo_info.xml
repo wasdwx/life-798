@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 宽条组合：最小 4×1，可拉高到 4×2 自动显示信息行（见 ComboWidgetProvider 的尺寸映射）。
+     不使用 android:configure，避免 HyperOS 添加失败。 -->
+<appwidget-provider xmlns:android="http://schemas.android.com/apk/res/android"
+    android:minWidth="250dp"
+    android:minHeight="40dp"
+    android:updatePeriodMillis="0"
+    android:initialLayout="@layout/widget_combo_compact"
+    android:previewLayout="@layout/widget_combo"
+    android:description="@string/widget_desc_combo"
+    android:resizeMode="horizontal|vertical"
+    android:widgetCategory="home_screen"
+    android:targetCellWidth="4"
+    android:targetCellHeight="1" />

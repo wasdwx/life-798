@@ -53,6 +53,18 @@ public class WaterService extends Service {
     private Session session;
     private long ownedReservationId;
 
+    /**
+     * 当前接水会话的状态文字，无会话时为 null。
+     *
+     * 桌面小部件和本服务在同一个进程，直接读这个字段就能显示实时状态，
+     * 不必再引入一套跨进程状态存储。
+     */
+    private static volatile String activeStatus;
+
+    public static String activeStatus() {
+        return activeStatus;
+    }
+
     public enum StartResult {
         STARTED,
         ALREADY_RUNNING,
@@ -120,6 +132,7 @@ public class WaterService extends Service {
         final String accountKey = intent.getStringExtra(EXTRA_ACCOUNT_KEY);
         AppNotifications.ensureChannels(this);
         startAsForeground("正在准备设备…");
+        publishStatus("正在准备…");
 
         if (
                 did == null ||
@@ -215,6 +228,7 @@ public class WaterService extends Service {
                     current.monitoringStartedAt =
                             System.currentTimeMillis() / 1_000L * 1_000L;
                     notifyWaterProgress("设备已启动，等待接水完成…");
+                    publishStatus("等待接水…");
                     mainHandler.postDelayed(
                             () -> pollConsumption(current),
                             FIRST_POLL_DELAY_MILLIS
@@ -383,6 +397,8 @@ public class WaterService extends Service {
         releaseReservation(current.reservationId);
         stopForeground(STOP_FOREGROUND_REMOVE);
         showResult(title, text, recovery);
+        // 会话结束，清空实时状态并通知小部件（widget_info 里 updatePeriodMillis=0，系统不会自己刷）
+        publishStatus(null);
         stopSelf(current.startId);
     }
 
@@ -397,8 +413,16 @@ public class WaterService extends Service {
         releaseReservation(ownedReservationId);
         stopForeground(STOP_FOREGROUND_REMOVE);
         showResult(title, text, recovery);
+        publishStatus(null);
         stopSelf(startId);
     }
+
+    /** 更新接水会话的实时状态并推给桌面小部件。传 null 表示会话已结束。 */
+    private void publishStatus(String status) {
+        activeStatus = status;
+        WidgetSupport.refreshAll(this);
+    }
+
 
     private void showResult(String title, String text, boolean recovery) {
         boolean posted = false;
@@ -467,10 +491,22 @@ public class WaterService extends Service {
     }
 
     @Override
+    public void onTaskRemoved(Intent rootIntent) {
+        // 用户从最近任务划掉应用后，本进程随时会被系统杀掉，届时没人再通知
+        // launcher 重绘，小部件会永远停在「等待接水…」。这里主动清空。
+        // ponytail: 前台服务在原生 Android 上可能撑过任务移除，那种情况下小部件
+        // 会提前退回待机；进行中的通知仍是权威来源，会话结束时也会再刷一次。
+        publishStatus(null);
+        super.onTaskRemoved(rootIntent);
+    }
+
+    @Override
     public void onDestroy() {
         session = null;
         mainHandler.removeCallbacksAndMessages(null);
         releaseReservation(ownedReservationId);
+        // 服务被系统杀掉时兜底，避免小部件永远停在「等待接水…」
+        if (activeStatus != null) publishStatus(null);
         super.onDestroy();
     }
 

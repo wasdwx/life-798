@@ -10,6 +10,7 @@ import android.os.Build
 import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
+import android.os.SystemClock
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -36,6 +37,7 @@ class TaskForegroundService : Service() {
     private var stoppingNormally = false
     private var completedLanes = 0
     private var hadFailures = false
+    private var lastWidgetRefreshAt = 0L
     private var latestStartId = 0
 
     override fun onCreate() {
@@ -45,6 +47,7 @@ class TaskForegroundService : Service() {
             TaskRunRepository.state.collect { state ->
                 if (running || stoppingNormally) {
                     updateNotification(state)
+                    throttledWidgetRefresh()
                 }
                 if (running) armStallWatchdog()
             }
@@ -169,6 +172,8 @@ class TaskForegroundService : Service() {
             taskLease?.let(TaskExecutionCoordinator::releaseAfterInFlightNetworkGrace)
             taskLease = null
             TaskRunRepository.cancel("任务服务被系统停止，可重新运行。")
+            // 状态已经不是「运行中」了，不刷新的话小部件会一直停在最后一次广播的进度上
+            WidgetSupport.refreshAll(this)
         } else if (TaskRunRepository.state.value.running) {
             // 服务都要销毁了，进程里不可能还有批次在跑。仓库却还挂着「运行中」，
             // 说明某条回调链被静默掐断、没走到 finishRun。
@@ -176,8 +181,15 @@ class TaskForegroundService : Service() {
             // 于是「点了没反应、不弹通知、运行记录里也没有」——必须在这里兜住。
             TaskRunRepository.cancel("上次任务未正常收尾，状态已重置，可重新运行。")
             notifyTaskResult(TaskRunRepository.state.value)
+            WidgetSupport.refreshAll(this)
         }
         super.onDestroy()
+    }
+
+    override fun onTaskRemoved(rootIntent: Intent?) {
+        // 同 WaterService：只触发重绘，让进程存活与否自己决定小部件显示什么
+        WidgetSupport.refreshAll(this)
+        super.onTaskRemoved(rootIntent)
     }
 
     private fun runAccountLane(
@@ -210,6 +222,12 @@ class TaskForegroundService : Service() {
         loadAndRunAccountTasks(account, laneId, runGeneration) { gained ->
             if (!isActive(runGeneration)) return@loadAndRunAccountTasks
             appendTaskLog("  [$account] 本账号获得 $gained 分")
+            if (gained > 0) {
+                // 起始余额已在 loadAndRunAccountTasks 里缓存，这里补上本次新增；
+                // 不补的话小部件显示的余额永远停在跑之前那个数。
+                account.score += gained
+                AccountStore.addOrUpdateKeepingCurrent(this@TaskForegroundService, account)
+            }
             if (index + 1 >= accounts.size) {
                 // 最后一个账号后面没有请求要限速，空等 ACCOUNT_GAP 只会让通知多停在「收尾」
                 done()
@@ -254,6 +272,11 @@ class TaskForegroundService : Service() {
                 val missions = data?.optJSONArray("missions")
                 val score = data?.optJSONObject("accScoreRsp")?.optInt("validScore", 0) ?: 0
                 appendTaskLog("  当前积分: $score，任务数: ${missions?.length() ?: 0}")
+                if (score > 0) {
+                    // 缓存下来供桌面小部件离线展示，小部件不能自己发网络请求
+                    account.score = score
+                    AccountStore.addOrUpdateKeepingCurrent(this@TaskForegroundService, account)
+                }
                 TaskRunRepository.updateLane(
                     laneId = laneId,
                     currentTask = "检查每日签到",
@@ -613,6 +636,7 @@ class TaskForegroundService : Service() {
         stoppingNormally = true
         mainHandler.removeCallbacks(stallWatchdog)
         notifyTaskResult(TaskRunRepository.state.value)
+        WidgetSupport.refreshAll(this)
         stopForeground(STOP_FOREGROUND_REMOVE)
         stopSelf(latestStartId)
     }
@@ -627,6 +651,7 @@ class TaskForegroundService : Service() {
         taskLease = null
         TaskRunRepository.cancel(message)
         notifyTaskResult(TaskRunRepository.state.value)
+        WidgetSupport.refreshAll(this)
         stopForeground(STOP_FOREGROUND_REMOVE)
         stopSelf(latestStartId)
     }
@@ -718,6 +743,19 @@ class TaskForegroundService : Service() {
         }
     }
 
+    /**
+     * 让桌面小部件跟上运行进度。
+     *
+     * 每条日志都会推一次状态，逐条广播太密；结束时的那次刷新在 [finishRun] 里
+     * 无条件执行，不走这里，所以不会被节流吞掉。
+     */
+    private fun throttledWidgetRefresh() {
+        val now = SystemClock.elapsedRealtime()
+        if (now - lastWidgetRefreshAt < WIDGET_REFRESH_INTERVAL_MILLIS) return
+        lastWidgetRefreshAt = now
+        WidgetSupport.refreshAll(this)
+    }
+
     private fun buildNotification(state: TaskRunState): Notification {
         val content = TaskNotificationTextFormatter.format(state)
         val builder = Notification.Builder(this, AppNotifications.CHANNEL_TASK_PROGRESS)
@@ -752,6 +790,7 @@ class TaskForegroundService : Service() {
         private const val RETRY_DELAY_MILLIS = 60_000L
         private const val MAX_RATE_LIMIT_RETRIES = 3
         private const val STALL_TIMEOUT_MILLIS = 4 * 60_000L
+        private const val WIDGET_REFRESH_INTERVAL_MILLIS = 3_000L
 
         fun start(context: Context): StartResult {
             if (TaskRunRepository.state.value.running) return StartResult.ALREADY_RUNNING

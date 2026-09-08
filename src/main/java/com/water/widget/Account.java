@@ -22,6 +22,8 @@ public class Account {
     public String eid;
     public String name;
     public String deviceId;
+    /** 最近一次刷新到的有效积分，供桌面小部件离线展示。 */
+    public int score;
     /** 当前账户的设备列表。 */
     public List<String> recentDeviceIds = new ArrayList<>();
     /** 服务端返回的设备名称。 */
@@ -45,6 +47,7 @@ public class Account {
             o.put("eid", n(eid));
             o.put("name", n(name));
             o.put("deviceId", n(deviceId));
+            o.put("score", score);
             o.put("recentDeviceIds", new JSONArray(recentDeviceIds));
             o.put("deviceNames", mapJson(deviceNames));
             o.put("deviceAliases", mapJson(deviceAliases));
@@ -61,6 +64,7 @@ public class Account {
         a.eid = o.optString("eid", "");
         a.name = o.optString("name", "");
         a.deviceId = o.optString("deviceId", "");
+        a.score = o.optInt("score", 0);
         readMap(o.optJSONObject("deviceNames"), a.deviceNames);
         readMap(o.optJSONObject("deviceAliases"), a.deviceAliases);
         String legacyHotDid = o.optString("hotDid", "");

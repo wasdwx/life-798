@@ -66,8 +66,11 @@
             android:exported="false"
             android:label="钱包充值" />
 
+        <!-- 小部件在选择器里的名字来自 receiver 的 android:label；
+             <appwidget-provider> 没有 label 属性，写在那儿会被静默忽略。 -->
         <receiver
             android:name=".WaterWidgetProvider"
+            android:label="@string/widget_label_classic"
             android:exported="false">
             <intent-filter>
                 <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
@@ -76,6 +79,46 @@
             <meta-data
                 android:name="android.appwidget.provider"
                 android:resource="@xml/widget_info" />
+        </receiver>
+
+        <receiver
+            android:name=".ComboWidgetProvider"
+            android:label="@string/widget_label_combo"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+                <action android:name="com.water.widget.combo.START_DEVICE" />
+                <action android:name="com.water.widget.combo.RUN_TASKS" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/widget_combo_info" />
+        </receiver>
+
+        <receiver
+            android:name=".DeviceWidgetProvider"
+            android:label="@string/widget_label_device"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+                <action android:name="com.water.widget.square.START_DEVICE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/widget_square_device_info" />
+        </receiver>
+
+        <receiver
+            android:name=".TaskWidgetProvider"
+            android:label="@string/widget_label_task"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+                <action android:name="com.water.widget.square.RUN_TASKS" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/widget_square_task_info" />
         </receiver>
 
         <service

@@ -2,4 +2,13 @@
 <resources>
     <string name="app_name">出水小部件</string>
     <string name="scan_device_qr_hint">对准设备屏幕上的二维码\n保持 8–15 厘米距离，避免反光</string>
+
+    <string name="widget_label_classic">出水控制</string>
+    <string name="widget_label_combo">出水 · 组合</string>
+    <string name="widget_label_device">出水 · 启动设备</string>
+    <string name="widget_label_task">出水 · 积分任务</string>
+    <string name="widget_desc_classic">单个大按钮，启动当前默认设备</string>
+    <string name="widget_desc_combo">启动设备 + 积分任务，拉高可显示设备名、积分与今日用水</string>
+    <string name="widget_desc_device">仅启动当前默认设备，1×1 起步，拉大显示更多信息</string>
+    <string name="widget_desc_task">仅执行积分任务，1×1 起步，拉大显示更多信息</string>
 </resources>

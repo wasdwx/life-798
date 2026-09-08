@@ -5,6 +5,7 @@
     android:minHeight="110dp"
     android:updatePeriodMillis="0"
     android:initialLayout="@layout/widget_water"
+    android:description="@string/widget_desc_classic"
     android:resizeMode="horizontal|vertical"
     android:widgetCategory="home_screen"
     android:targetCellWidth="4"

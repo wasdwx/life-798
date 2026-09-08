@@ -1,0 +1,83 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 宽条组合 4×1：高度只够一行，省掉设备名与用水统计。
+     按钮 id 与 widget_combo.xml 一致，Provider 绑定点击时无需按尺寸分支；
+     状态文字直接写进按钮唯一那行（此尺寸没有第二行可用）。 -->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools"
+    android:id="@android:id/background"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="horizontal"
+    android:background="@drawable/widget_surface_bg"
+    android:padding="8dp">
+
+    <LinearLayout
+        android:id="@+id/combo_btn_device"
+        android:layout_width="0dp"
+        android:layout_height="match_parent"
+        android:layout_weight="1"
+        android:layout_marginEnd="4dp"
+        android:orientation="horizontal"
+        android:gravity="center"
+        android:paddingStart="8dp"
+        android:paddingEnd="8dp"
+        android:background="@drawable/btn_device_tonal"
+        android:foreground="@drawable/widget_press_ripple">
+
+        <ImageView
+            android:id="@+id/combo_icon_device"
+            android:layout_width="18dp"
+            android:layout_height="18dp"
+            android:layout_marginEnd="7dp"
+            android:src="@drawable/ic_water_drop"
+            android:tint="@color/widget_on_device_container"
+            tools:ignore="ContentDescription,UseAppTint" />
+
+        <TextView
+            android:id="@+id/combo_device_status"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:text="启动设备"
+            android:textSize="13sp"
+            android:textStyle="bold"
+            android:textColor="@color/widget_on_device_container"
+            android:singleLine="true"
+            android:ellipsize="end" />
+    </LinearLayout>
+
+    <LinearLayout
+        android:id="@+id/combo_btn_task"
+        android:layout_width="0dp"
+        android:layout_height="match_parent"
+        android:layout_weight="1"
+        android:layout_marginStart="4dp"
+        android:orientation="horizontal"
+        android:gravity="center"
+        android:paddingStart="8dp"
+        android:paddingEnd="8dp"
+        android:background="@drawable/btn_task_tonal"
+        android:foreground="@drawable/widget_press_ripple">
+
+        <ImageView
+            android:id="@+id/combo_icon_task"
+            android:layout_width="18dp"
+            android:layout_height="18dp"
+            android:layout_marginEnd="7dp"
+            android:src="@drawable/ic_task_star"
+            android:tint="@color/widget_on_task_container"
+            tools:ignore="ContentDescription,UseAppTint" />
+
+        <TextView
+            android:id="@+id/combo_task_status"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:text="积分任务"
+            android:textSize="13sp"
+            android:textStyle="bold"
+            android:textColor="@color/widget_on_task_container"
+            android:singleLine="true"
+            android:ellipsize="end" />
+    </LinearLayout>
+</LinearLayout>
