@@ -218,7 +218,7 @@ public class WaterService extends Service {
                         finishWithResult(
                                 current,
                                 "设备启动失败",
-                                status == null ? "请返回应用检查设备与登录信息" : status,
+                                startFailureDetail(status),
                                 true
                         );
                         return;
@@ -440,7 +440,8 @@ public class WaterService extends Service {
                 }
             }
         }
-        // 需要用户处理的失败同时弹 Toast，避免停留在主页时漏看通知。
+        // 需要用户处理的失败（如设备登录被拒绝）总是弹 Toast：
+        // 用户多半正停留在刚点过启动的主页，只发通知容易被忽略。
         if (recovery || !posted) Toast.makeText(this, title + "：" + text, Toast.LENGTH_LONG).show();
     }
 
@@ -471,6 +472,16 @@ public class WaterService extends Service {
 
     private static boolean isSuccessStatus(String status) {
         return status != null && status.contains("成功") && !status.contains("失败");
+    }
+
+    private static String startFailureDetail(String status) {
+        if (status != null && status.startsWith("启动失败：")) {
+            status = status.substring("启动失败：".length());
+        }
+        if (status == null || status.isBlank()) {
+            return "请返回应用检查设备与登录信息";
+        }
+        return status;
     }
 
     @Override
