@@ -4,6 +4,8 @@ on:
   pull_request:
     types: [opened, synchronize, reopened, ready_for_review]
   push:
+    branches:
+      - 'personal/main'
     tags:
       - 'v*'
   workflow_dispatch:
@@ -18,7 +20,7 @@ concurrency:
 jobs:
   validate:
     name: Validate Android build
-    if: github.event_name != 'push'
+    if: github.event_name != 'push' || !startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
 
     steps:
@@ -112,6 +114,31 @@ jobs:
           test -n "$version_name"
           test "$GITHUB_REF_NAME" = "v$version_name"
 
+      - name: Check release configuration
+        id: release_config
+        env:
+          API_GATEWAY: ${{ secrets.API_GATEWAY }}
+          SIGN_SALT: ${{ secrets.SIGN_SALT }}
+          API_CID: ${{ secrets.API_CID }}
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+          EXPECTED_RELEASE_CERT_SHA256: ${{ vars.EXPECTED_RELEASE_CERT_SHA256 }}
+        run: |
+          for name in API_GATEWAY SIGN_SALT API_CID ANDROID_KEYSTORE_BASE64 ANDROID_KEYSTORE_PASSWORD ANDROID_KEY_ALIAS ANDROID_KEY_PASSWORD; do
+            if [[ -z "${!name}" ]]; then
+              echo "::error::Missing required Actions secret: $name"
+              exit 1
+            fi
+          done
+          expected_cert_sha256="$(printf '%s' "$EXPECTED_RELEASE_CERT_SHA256" | tr -d '[:space:]:' | tr 'A-F' 'a-f')"
+          if [[ ! "$expected_cert_sha256" =~ ^[0-9a-f]{64}$ ]]; then
+            echo "::error::Set the Actions variable EXPECTED_RELEASE_CERT_SHA256 to your signing certificate SHA-256 fingerprint."
+            exit 1
+          fi
+          printf 'cert_sha256=%s\n' "$expected_cert_sha256" >> "$GITHUB_OUTPUT"
+
       - name: Generate secrets.properties
         env:
           API_GATEWAY: ${{ secrets.API_GATEWAY }}
@@ -121,18 +148,6 @@ jobs:
           printf 'API_GATEWAY=%s\n' "$API_GATEWAY" > secrets.properties
           printf 'SIGN_SALT=%s\n' "$SIGN_SALT" >> secrets.properties
           printf 'API_CID=%s\n' "$API_CID" >> secrets.properties
-
-      - name: Check release signing configuration
-        env:
-          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
-          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
-          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
-          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
-        run: |
-          test -n "$ANDROID_KEYSTORE_BASE64"
-          test -n "$ANDROID_KEYSTORE_PASSWORD"
-          test -n "$ANDROID_KEY_ALIAS"
-          test -n "$ANDROID_KEY_PASSWORD"
 
       - name: Run unit tests
         run: ./gradlew testDebugUnitTest --no-daemon --stacktrace --info
@@ -147,24 +162,22 @@ jobs:
           ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
           ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
         run: |
+          umask 077
           printf '%s' "$ANDROID_KEYSTORE_BASE64" | base64 --decode > "$RUNNER_TEMP/waterwidget-release.jks"
           ANDROID_KEYSTORE_PATH="$RUNNER_TEMP/waterwidget-release.jks" ./gradlew assembleRelease --no-daemon --stacktrace --info
 
       - name: Verify release APK signature
         env:
-          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
-          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
-          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
-          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
-          EXPECTED_RELEASE_CERT_SHA256: 9bd997fcceb68c970799be397d65f4b9c4628af4bd0050422b230d82f8d9fc92
+          EXPECTED_RELEASE_CERT_SHA256: ${{ steps.release_config.outputs.cert_sha256 }}
         run: |
-          printf '%s' "$ANDROID_KEYSTORE_BASE64" | base64 --decode > "$RUNNER_TEMP/waterwidget-release.jks"
-          keytool -list -v -keystore "$RUNNER_TEMP/waterwidget-release.jks" -storepass "$ANDROID_KEYSTORE_PASSWORD" -alias "$ANDROID_KEY_ALIAS" | grep "SHA256:"
           apk_path="app/build/outputs/apk/release/app-release.apk"
           signer_output="$("$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --verbose --print-certs "$apk_path")"
           printf '%s\n' "$signer_output"
           actual_cert_sha256="$(printf '%s\n' "$signer_output" | awk -F': ' '/Signer #1 certificate SHA-256 digest/ {print $2; exit}')"
-          test "$actual_cert_sha256" = "$EXPECTED_RELEASE_CERT_SHA256"
+          if [[ "$actual_cert_sha256" != "$EXPECTED_RELEASE_CERT_SHA256" ]]; then
+            echo "::error::Release APK signing certificate does not match EXPECTED_RELEASE_CERT_SHA256."
+            exit 1
+          fi
 
       - name: Preserve R8 mapping
         uses: actions/upload-artifact@v4
@@ -192,8 +205,15 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           asset="$RUNNER_TEMP/release-assets/WaterWidget-${GITHUB_REF_NAME}-release.apk"
+          release_flags=()
+          if [[ "$GITHUB_REF_NAME" == *-* ]]; then
+            release_flags=(--prerelease --latest=false)
+          fi
           if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
             gh release upload "$GITHUB_REF_NAME" "$asset" --clobber
+            if (( ${#release_flags[@]} > 0 )); then
+              gh release edit "$GITHUB_REF_NAME" "${release_flags[@]}"
+            fi
           else
-            gh release create "$GITHUB_REF_NAME" "$asset" --generate-notes
+            gh release create "$GITHUB_REF_NAME" "$asset" --verify-tag --generate-notes "${release_flags[@]}"
           fi
