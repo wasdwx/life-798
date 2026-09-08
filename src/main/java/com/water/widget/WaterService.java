@@ -36,6 +36,15 @@ public class WaterService extends Service {
     private static final long FIRST_POLL_DELAY_MILLIS = 8_000L;
     private static final long POLL_INTERVAL_MILLIS = 10_000L;
     private static final long MAX_MONITOR_MILLIS = 10 * 60_000L;
+    /**
+     * 连续几轮「账单已结算但查不到消费」才判定为未实际接水。
+     *
+     * 账单和消费流水未必同一秒落库。真机实测账单在会话开始约 13 秒后出现，
+     * 1轮给积分抵扣的那条 type=107 留出足够的落库时间，
+     * 避免真实接水被误报成「没接水」——那个方向的错误更难受。
+     */
+    private static final int SESSION_END_CONFIRM_ROUNDS = 1;
+
     private static final String EXTRA_RESERVATION_ID = "extra_reservation_id";
     private static final AtomicLong NEXT_RESERVATION_ID = new AtomicLong();
     private static final AtomicLong ACTIVE_RESERVATION_ID = new AtomicLong();
@@ -241,19 +250,27 @@ public class WaterService extends Service {
                             }
                             finishConsumption(current, bill);
                         } else {
-                            pollScoreConsumption(current);
+                            // 账单已结算但金额判定没命中：可能是积分抵扣，也可能是启动后压根没接水。
+                            // 先记下「会话结束了」，再看积分流水有没有对应消费。
+                            boolean settled = WaterBillParser.INSTANCE.hasSettledRecordSince(
+                                    billJson,
+                                    current.monitoringStartedAt,
+                                    current.did,
+                                    current.billBaseline
+                            );
+                            pollScoreConsumption(current, settled);
                         }
                     })
             );
         } else {
-            pollScoreConsumption(current);
+            pollScoreConsumption(current, false);
         }
     }
 
-    private void pollScoreConsumption(Session current) {
+    private void pollScoreConsumption(Session current, boolean billSettled) {
         if (!isActive(current)) return;
         if (current.scoreToken.isEmpty()) {
-            scheduleNextPoll(current);
+            settleOrRetry(current, billSettled);
             return;
         }
         IlifeApi.scoreLstWithToken(current.scoreToken, (json, err) ->
@@ -267,7 +284,7 @@ public class WaterService extends Service {
                                     current.scoreBaseline
                             );
                     if (consumption == null) {
-                        scheduleNextPoll(current);
+                        settleOrRetry(current, billSettled);
                         return;
                     }
                     if (!current.accountKey.isEmpty()) {
@@ -280,6 +297,32 @@ public class WaterService extends Service {
                     finishConsumption(current, consumption);
                 })
         );
+    }
+
+    /**
+     * 账单已结算、却始终查不到对应消费金额，说明这次启动后大概没有实际接水。
+     *
+     * 真机数据：启动后立刻物理停止，服务端仍会生成一条 type=91 / status=3 /
+     * payment=0 的账单。只看金额的话这条记录会被跳过，监测只能空转到十分钟超时。
+     */
+    private void settleOrRetry(Session current, boolean billSettled) {
+        if (!isActive(current)) return;
+        if (!billSettled) {
+            current.settledRounds = 0;
+            scheduleNextPoll(current);
+            return;
+        }
+        current.settledRounds++;
+        if (current.settledRounds >= SESSION_END_CONFIRM_ROUNDS) {
+            finishWithResult(
+                    current,
+                    "接水会话已结束",
+                    "未查询到消费记录，可能没有实际接水",
+                    false
+            );
+            return;
+        }
+        scheduleNextPoll(current);
     }
 
     private void scheduleNextPoll(Session current) {
@@ -449,6 +492,8 @@ public class WaterService extends Service {
         int pendingBaselines;
         boolean baselineFrozen;
         long monitoringStartedAt;
+        /** 连续几轮「账单已结算但查不到消费」，达到阈值即判定为未实际接水。 */
+        int settledRounds;
 
         Session(
                 int startId,
