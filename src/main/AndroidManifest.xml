@@ -66,6 +66,11 @@
             android:exported="false"
             android:label="钱包充值" />
 
+        <activity
+            android:name=".AppearanceActivity"
+            android:exported="false"
+            android:label="外观设置" />
+
         <!-- 小部件在选择器里的名字来自 receiver 的 android:label；
              <appwidget-provider> 没有 label 属性，写在那儿会被静默忽略。 -->
         <receiver

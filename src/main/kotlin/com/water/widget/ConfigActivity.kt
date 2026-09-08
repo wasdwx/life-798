@@ -38,6 +38,8 @@ class ConfigActivity : ComponentActivity() {
     private val ui = Handler(Looper.getMainLooper())
     private var scoreGeneration = 0
     private var destroyed = false
+    /** 外观设置页可能改了显示模式，回到前台时对不上就重建 */
+    private var appliedMode: AppThemeMode? = null
     private var notificationRequestInFlight = false
     private val requestNotifications = registerForActivityResult(
         ActivityResultContracts.RequestPermission()
@@ -58,6 +60,7 @@ class ConfigActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         UI.applySystemBarAppearance(this, ThemeSettings.isDark(this))
         AppNotifications.ensureChannels(this)
+        appliedMode = ThemeSettings.mode(this)
         setContent {
             WaterTheme(mode = ThemeSettings.mode(this)) {
                 val state by viewModel.uiState.collectAsStateWithLifecycle()
@@ -66,11 +69,7 @@ class ConfigActivity : ComponentActivity() {
                     onLogin = { startActivity(Intent(this, LoginActivity::class.java)) },
                     onAccounts = { startActivity(Intent(this, AccountsActivity::class.java)) },
                     themeMode = ThemeSettings.mode(this),
-                    onThemeModeChange = { mode ->
-                        ThemeSettings.setMode(this, mode)
-                        UI.applySystemBarAppearance(this, ThemeSettings.isDark(this))
-                        recreate()
-                    },
+                    onAppearance = { startActivity(Intent(this, AppearanceActivity::class.java)) },
                     onRunTasks = { runWithNotificationPermission(::runTasksInHome) },
                     onScores = { startActivity(Intent(this, ScoreActivity::class.java)) },
                     onWallet = { startActivity(Intent(this, WalletActivity::class.java)) },
@@ -107,6 +106,10 @@ class ConfigActivity : ComponentActivity() {
 
     override fun onResume() {
         super.onResume()
+        if (ThemeSettings.mode(this) != appliedMode) {
+            recreate()
+            return
+        }
         viewModel.reloadAccounts(resetScore = true)
         refreshCurrentScore()
         updateWidgets()

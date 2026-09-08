@@ -49,7 +49,6 @@ import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.AccountBalanceWallet
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.CheckCircle
-import androidx.compose.material.icons.filled.DarkMode
 import androidx.compose.material.icons.filled.DeleteOutline
 import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.Home
@@ -122,7 +121,7 @@ fun DashboardScreen(
     onLogin: () -> Unit,
     onAccounts: () -> Unit,
     themeMode: AppThemeMode,
-    onThemeModeChange: (AppThemeMode) -> Unit,
+    onAppearance: () -> Unit,
     onRunTasks: () -> Unit,
     onScores: () -> Unit,
     onWallet: () -> Unit,
@@ -155,7 +154,6 @@ fun DashboardScreen(
     val bottomContentPadding = 92.dp +
         WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
     var showAccountSwitcher by rememberSaveable { mutableStateOf(false) }
-    var showAppearanceSettings by rememberSaveable { mutableStateOf(false) }
     var showSupportDialog by rememberSaveable { mutableStateOf(false) }
 
     Box(modifier = modifier.fillMaxSize().background(colors.background)) {
@@ -236,7 +234,7 @@ fun DashboardScreen(
                             onScores = onScores,
                             onWallet = onWallet,
                             themeMode = themeMode,
-                            onOpenAppearanceSettings = { showAppearanceSettings = true },
+                            onOpenAppearanceSettings = onAppearance,
                             onOpenSupport = { showSupportDialog = true }
                         )
                         Spacer(Modifier.height(8.dp))
@@ -264,16 +262,6 @@ fun DashboardScreen(
             onSelect = { phone ->
                 showAccountSwitcher = false
                 onSelectAccount(phone)
-            }
-        )
-    }
-    if (showAppearanceSettings) {
-        AppearanceSettingsDialog(
-            mode = themeMode,
-            onDismiss = { showAppearanceSettings = false },
-            onModeSelect = { mode ->
-                showAppearanceSettings = false
-                onThemeModeChange(mode)
             }
         )
     }
@@ -691,9 +679,9 @@ private fun MineTab(
         onClick = onWallet
     )
     SettingsRow(
-        icon = Icons.Default.DarkMode,
+        icon = Icons.Default.Palette,
         title = "外观设置",
-        subtitle = themeMode.label,
+        subtitle = "${themeMode.label} · 小部件透明度与配色",
         onClick = onOpenAppearanceSettings
     )
     SettingsRow(
@@ -779,39 +767,6 @@ private fun AccountSwitcherDialog(accounts: List<DashboardAccountUiState>, onDis
             }
         },
         confirmButton = { Text("取消", modifier = Modifier.padding(8.dp).clickable(onClick = onDismiss), color = MaterialTheme.colorScheme.primary) },
-        shape = RoundedCornerShape(28.dp)
-    )
-}
-
-@Composable
-private fun AppearanceSettingsDialog(
-    mode: AppThemeMode,
-    onDismiss: () -> Unit,
-    onModeSelect: (AppThemeMode) -> Unit
-) {
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        icon = { Icon(Icons.Default.Palette, contentDescription = null, tint = MaterialTheme.colorScheme.primary) },
-        title = { Text("外观设置", fontWeight = FontWeight.Bold) },
-        text = {
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text("显示模式", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 13.sp)
-                AppThemeMode.entries.forEach { item ->
-                    Surface(
-                        onClick = { onModeSelect(item) },
-                        shape = RoundedCornerShape(15.dp),
-                        color = if (item == mode) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceVariant,
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        Row(Modifier.padding(horizontal = 14.dp, vertical = 13.dp), verticalAlignment = Alignment.CenterVertically) {
-                            Text(item.label, modifier = Modifier.weight(1f), fontWeight = if (item == mode) FontWeight.SemiBold else FontWeight.Normal)
-                            if (item == mode) Icon(Icons.Default.Check, contentDescription = "已选中", tint = MaterialTheme.colorScheme.primary)
-                        }
-                    }
-                }
-            }
-        },
-        confirmButton = { Text("完成", modifier = Modifier.padding(8.dp).clickable(onClick = onDismiss), color = MaterialTheme.colorScheme.primary) },
         shape = RoundedCornerShape(28.dp)
     )
 }
@@ -1053,7 +1008,7 @@ private fun DashboardPreview() {
             onLogin = {},
             onAccounts = {},
             themeMode = AppThemeMode.SYSTEM,
-            onThemeModeChange = {},
+            onAppearance = {},
             onRunTasks = {},
             onScores = {},
             onWallet = {},
