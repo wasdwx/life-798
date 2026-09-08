@@ -1,6 +1,8 @@
 package com.water.widget
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class TaskNotificationTextFormatterTest {
@@ -105,5 +107,30 @@ class TaskNotificationTextFormatterTest {
             ),
             TaskNotificationTextFormatter.format(state)
         )
+    }
+
+    /**
+     * 「正在收尾」是运行中状态才有的文字：所有通道都标了完成、但 finish() 还没来。
+     *
+     * 真机上通知栏长期停在这句话，就等于批次没走到 finishRun，
+     * 仓库的 running 挂死，之后每次启动都被判成「已在运行」。
+     * 这条用例把这个含义钉住，别哪天顺手把它改成终态文案。
+     */
+    @Test
+    fun wrapUpTextOnlyExistsWhileStillRunning() {
+        val allLanesDone = TaskRunReducer.completeLane(
+            TaskRunReducer.start(
+                listOf(TaskLaneState(laneId = 1, laneCount = 1, accountCount = 1))
+            ),
+            laneId = 1
+        )
+
+        assertTrue(allLanesDone.running)
+        assertEquals("正在收尾", TaskNotificationTextFormatter.format(allLanesDone).text)
+
+        // 真正收尾之后必须换成终态标题，不能再是「运行中」
+        val finished = TaskRunReducer.finish(allLanesDone)
+        assertFalse(finished.running)
+        assertEquals("积分任务已完成", TaskNotificationTextFormatter.format(finished).title)
     }
 }

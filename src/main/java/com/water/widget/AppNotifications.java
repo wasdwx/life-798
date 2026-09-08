@@ -15,10 +15,12 @@ public final class AppNotifications {
     public static final String CHANNEL_WATER_SESSION = "water_session";
     public static final String CHANNEL_WATER_RESULT = "water_result";
     public static final String CHANNEL_TASK_PROGRESS = "task_progress";
+    public static final String CHANNEL_TASK_RESULT = "task_result";
 
     public static final int WATER_SESSION_ID = 2201;
     public static final int WATER_RESULT_ID = 2202;
     public static final int TASK_PROGRESS_ID = 2301;
+    public static final int TASK_RESULT_ID = 2302;
 
     private AppNotifications() {}
 
@@ -54,6 +56,16 @@ public final class AppNotifications {
         tasks.setLockscreenVisibility(Notification.VISIBILITY_PRIVATE);
         tasks.setShowBadge(false);
         manager.createNotificationChannel(tasks);
+
+        // 进度和结果分渠道，和接水那套一致：进度是常驻低优先级，结果可划掉、能冒泡。
+        NotificationChannel taskResult = new NotificationChannel(
+                CHANNEL_TASK_RESULT,
+                "积分任务结果",
+                NotificationManager.IMPORTANCE_DEFAULT
+        );
+        taskResult.setDescription("积分任务结束后显示本次获得的积分");
+        taskResult.setLockscreenVisibility(Notification.VISIBILITY_PRIVATE);
+        manager.createNotificationChannel(taskResult);
     }
 
     public static boolean canPost(Context context, String channelId) {
@@ -96,6 +108,21 @@ public final class AppNotifications {
                 .setContentText(text)
                 .setStyle(new Notification.BigTextStyle().bigText(text))
                 .setContentIntent(openApp(context, recovery, 2202))
+                .setCategory(Notification.CATEGORY_STATUS)
+                .setVisibility(Notification.VISIBILITY_PRIVATE)
+                .setAutoCancel(true)
+                .build();
+    }
+
+    /** 积分任务结束后的结果通知：不常驻、无进度条、点掉即走。 */
+    public static Notification taskResult(Context context, String title, String text) {
+        ensureChannels(context);
+        return new Notification.Builder(context, CHANNEL_TASK_RESULT)
+                .setSmallIcon(R.drawable.ic_water_drop)
+                .setContentTitle(title)
+                .setContentText(text)
+                .setStyle(new Notification.BigTextStyle().bigText(text))
+                .setContentIntent(openApp(context, false, TASK_RESULT_ID))
                 .setCategory(Notification.CATEGORY_STATUS)
                 .setVisibility(Notification.VISIBILITY_PRIVATE)
                 .setAutoCancel(true)

@@ -36,25 +36,57 @@ class TaskForegroundService : Service() {
     private var stoppingNormally = false
     private var completedLanes = 0
     private var hadFailures = false
+    private var latestStartId = 0
 
     override fun onCreate() {
         super.onCreate()
         createNotificationChannel()
         notificationScope.launch {
             TaskRunRepository.state.collect { state ->
-                if (running || stoppingNormally) updateNotification(state)
+                if (running || stoppingNormally) {
+                    updateNotification(state)
+                }
+                if (running) armStallWatchdog()
             }
         }
+    }
+
+    /**
+     * 批次停摆看门狗。
+     *
+     * 任何一条回调链被静默掐断（网络回调没回、通道计数没对上、限速重试打转），
+     * finishRun 就不会来，仓库的 running 会永远挂在 true 上，
+     * 而前台服务自己不会死，于是 onDestroy 的兜底也轮不到。
+     * 之后每次启动都被判成「已在运行」——点了没反应、不弹通知、运行记录也不动。
+     *
+     * 合法的最长静默是限速重试的 60 秒加上两个 15 秒网络超时，
+     * 四分钟没有任何状态变化就足以断定卡死了。
+     */
+    private val stallWatchdog = Runnable {
+        if (running) {
+            softCancel("任务超过 ${STALL_TIMEOUT_MILLIS / 60_000} 分钟没有进展，已自动停止，可重新运行。")
+        }
+    }
+
+    private fun armStallWatchdog() {
+        mainHandler.removeCallbacks(stallWatchdog)
+        mainHandler.postDelayed(stallWatchdog, STALL_TIMEOUT_MILLIS)
     }
 
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        latestStartId = startId
         if (intent?.action != ACTION_RUN_TASKS) {
             stopSelf(startId)
             return START_NOT_STICKY
         }
-        if (running || TaskRunRepository.state.value.running) return START_NOT_STICKY
+        if (running || TaskRunRepository.state.value.running) {
+            // 这里不能 stopSelf(startId)：startId 是刚收到的、也就是最新的，
+            // stopSelf 会真的把服务停掉，连带干掉正在跑的批次。
+            // 服务已经在前台，系统的 5 秒 startForeground 要求也已经满足。
+            return START_NOT_STICKY
+        }
 
         val accounts = AccountStore.list(this).filter { it.hasToken() }
         if (accounts.isEmpty()) {
@@ -70,8 +102,8 @@ class TaskForegroundService : Service() {
             TaskRunRepository.fail(message)
             val failedState = TaskRunRepository.state.value
             startForegroundCompat(buildNotification(failedState))
-            updateNotification(failedState)
-            stopForeground(STOP_FOREGROUND_DETACH)
+            notifyTaskResult(failedState)
+            stopForeground(STOP_FOREGROUND_REMOVE)
             stopSelf(startId)
             return START_NOT_STICKY
         }
@@ -111,7 +143,9 @@ class TaskForegroundService : Service() {
                 if (!isActive(runGeneration)) return@runAccountLane
                 TaskRunRepository.completeLane(laneIndex + 1)
                 completedLanes += 1
-                if (completedLanes == plannedLanes.size) finishRun()
+                // 用 >= 而不是 ==：万一某个通道回调多走了一次，用相等判断会直接错过收尾，
+                // 仓库的 running 就永远挂在 true 上，之后每次启动都被当成「已在运行」。
+                if (completedLanes >= plannedLanes.size) finishRun()
             }
         }
         return START_NOT_STICKY
@@ -127,6 +161,7 @@ class TaskForegroundService : Service() {
 
     override fun onDestroy() {
         notificationScope.cancel()
+        mainHandler.removeCallbacks(stallWatchdog)
         if (running && !stoppingNormally) {
             generation += 1
             running = false
@@ -134,6 +169,13 @@ class TaskForegroundService : Service() {
             taskLease?.let(TaskExecutionCoordinator::releaseAfterInFlightNetworkGrace)
             taskLease = null
             TaskRunRepository.cancel("任务服务被系统停止，可重新运行。")
+        } else if (TaskRunRepository.state.value.running) {
+            // 服务都要销毁了，进程里不可能还有批次在跑。仓库却还挂着「运行中」，
+            // 说明某条回调链被静默掐断、没走到 finishRun。
+            // 这个 latch 没人会再清：start() 会永远返回 ALREADY_RUNNING，
+            // 于是「点了没反应、不弹通知、运行记录里也没有」——必须在这里兜住。
+            TaskRunRepository.cancel("上次任务未正常收尾，状态已重置，可重新运行。")
+            notifyTaskResult(TaskRunRepository.state.value)
         }
         super.onDestroy()
     }
@@ -168,9 +210,14 @@ class TaskForegroundService : Service() {
         loadAndRunAccountTasks(account, laneId, runGeneration) { gained ->
             if (!isActive(runGeneration)) return@loadAndRunAccountTasks
             appendTaskLog("  [$account] 本账号获得 $gained 分")
+            if (index + 1 >= accounts.size) {
+                // 最后一个账号后面没有请求要限速，空等 ACCOUNT_GAP 只会让通知多停在「收尾」
+                done()
+                return@loadAndRunAccountTasks
+            }
             TaskRunRepository.updateLane(
                 laneId = laneId,
-                currentTask = if (index + 1 < accounts.size) "准备下一个账号" else "正在收尾",
+                currentTask = "准备下一个账号",
                 phase = TaskLanePhase.WAITING
             )
             postDelayed(ACCOUNT_GAP_MILLIS, runGeneration) {
@@ -430,6 +477,7 @@ class TaskForegroundService : Service() {
         gained: Int,
         laneId: Int,
         runGeneration: Int,
+        rateLimitRetries: Int = 0,
         done: (Int) -> Unit
     ) {
         if (!isActive(runGeneration)) return
@@ -476,27 +524,40 @@ class TaskForegroundService : Service() {
                             gained + item.score
                         }
                         json.optInt("code", -999) == -98 -> {
-                            appendTaskLog(
-                                "    [$account] $platformName ${item.name}$round：" +
-                                    "请求过于频繁，60秒后重试"
-                            )
-                            TaskRunRepository.updateLane(
-                                laneId = laneId,
-                                currentTask = "${item.name}受限，等待重试",
-                                phase = TaskLanePhase.WAITING
-                            )
-                            postDelayed(RETRY_DELAY_MILLIS, runGeneration) {
-                                runMissionItems(
-                                    account,
-                                    work,
-                                    index,
-                                    gained,
-                                    laneId,
-                                    runGeneration,
-                                    done
+                            if (rateLimitRetries >= MAX_RATE_LIMIT_RETRIES) {
+                                // 无限重试同一项会让通道永远完不了，finishRun 也就永远不来，
+                                // 仓库的 running 卡死，之后所有启动都被判为「已在运行」。
+                                hadFailures = true
+                                appendTaskLog(
+                                    "    [$account] $platformName ${item.name}$round：" +
+                                        "连续 $MAX_RATE_LIMIT_RETRIES 次受限，跳过这一项"
                                 )
+                                gained
+                            } else {
+                                appendTaskLog(
+                                    "    [$account] $platformName ${item.name}$round：" +
+                                        "请求过于频繁，60秒后重试" +
+                                        "（第 ${rateLimitRetries + 1}/$MAX_RATE_LIMIT_RETRIES 次）"
+                                )
+                                TaskRunRepository.updateLane(
+                                    laneId = laneId,
+                                    currentTask = "${item.name}受限，等待重试",
+                                    phase = TaskLanePhase.WAITING
+                                )
+                                postDelayed(RETRY_DELAY_MILLIS, runGeneration) {
+                                    runMissionItems(
+                                        account,
+                                        work,
+                                        index,
+                                        gained,
+                                        laneId,
+                                        runGeneration,
+                                        rateLimitRetries + 1,
+                                        done
+                                    )
+                                }
+                                return@onMain
                             }
-                            return@onMain
                         }
                         else -> {
                             hadFailures = true
@@ -507,13 +568,15 @@ class TaskForegroundService : Service() {
                             gained
                         }
                     }
+                    if (index + 1 >= work.size) {
+                        // 最后一项后面没有请求要限速，直接收工；
+                        // 空等 MISSION_GAP 会让「正在收尾」白白停留 30 秒。
+                        done(nextGained)
+                        return@onMain
+                    }
                     TaskRunRepository.updateLane(
                         laneId = laneId,
-                        currentTask = if (index + 1 < work.size) {
-                            "等待下一项任务"
-                        } else {
-                            "正在收尾"
-                        },
+                        currentTask = "等待下一项任务",
                         phase = TaskLanePhase.WAITING
                     )
                     postDelayed(MISSION_GAP_MILLIS, runGeneration) {
@@ -524,6 +587,7 @@ class TaskForegroundService : Service() {
                             nextGained,
                             laneId,
                             runGeneration,
+                            0,
                             done
                         )
                     }
@@ -547,9 +611,10 @@ class TaskForegroundService : Service() {
         taskLease = null
         running = false
         stoppingNormally = true
-        updateNotification(TaskRunRepository.state.value)
-        stopForeground(STOP_FOREGROUND_DETACH)
-        stopSelf()
+        mainHandler.removeCallbacks(stallWatchdog)
+        notifyTaskResult(TaskRunRepository.state.value)
+        stopForeground(STOP_FOREGROUND_REMOVE)
+        stopSelf(latestStartId)
     }
 
     private fun softCancel(message: String) {
@@ -561,9 +626,9 @@ class TaskForegroundService : Service() {
         taskLease?.let(TaskExecutionCoordinator::releaseAfterInFlightNetworkGrace)
         taskLease = null
         TaskRunRepository.cancel(message)
-        updateNotification(TaskRunRepository.state.value)
-        stopForeground(STOP_FOREGROUND_DETACH)
-        stopSelf()
+        notifyTaskResult(TaskRunRepository.state.value)
+        stopForeground(STOP_FOREGROUND_REMOVE)
+        stopSelf(latestStartId)
     }
 
     private fun isActive(runGeneration: Int): Boolean =
@@ -632,6 +697,27 @@ class TaskForegroundService : Service() {
         }
     }
 
+    /**
+     * 结束时另发一条结果通知，而不是把进度通知原地改文字。
+     *
+     * 进度通知挂在前台服务上、常驻且带不确定进度条；就地改文字在部分系统上
+     * 仍然显示成「执行中」的样子，也划不掉。接水那套一直是进度、结果分两条，
+     * 这里对齐它：进度条随 [stopForeground] 一起 REMOVE 掉，结果单独发。
+     */
+    private fun notifyTaskResult(state: TaskRunState) {
+        if (state.running) return
+        val content = TaskNotificationTextFormatter.format(state)
+        try {
+            getSystemService(NotificationManager::class.java)
+                .notify(
+                    AppNotifications.TASK_RESULT_ID,
+                    AppNotifications.taskResult(this, content.title, content.text)
+                )
+        } catch (_: SecurityException) {
+            // Android 13+ 用户可拒绝通知权限，运行记录里仍有完整日志。
+        }
+    }
+
     private fun buildNotification(state: TaskRunState): Notification {
         val content = TaskNotificationTextFormatter.format(state)
         val builder = Notification.Builder(this, AppNotifications.CHANNEL_TASK_PROGRESS)
@@ -664,6 +750,8 @@ class TaskForegroundService : Service() {
         private const val ACCOUNT_GAP_MILLIS = 1_200L
         private const val MISSION_GAP_MILLIS = 30_000L
         private const val RETRY_DELAY_MILLIS = 60_000L
+        private const val MAX_RATE_LIMIT_RETRIES = 3
+        private const val STALL_TIMEOUT_MILLIS = 4 * 60_000L
 
         fun start(context: Context): StartResult {
             if (TaskRunRepository.state.value.running) return StartResult.ALREADY_RUNNING
