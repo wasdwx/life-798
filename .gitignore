@@ -17,6 +17,9 @@ local.properties
 .idea/
 *.iml
 .vscode/
+.claude/
+docs/
+.playwright-mcp/
 
 # 签名密钥与证书，禁止提交
 *.jks

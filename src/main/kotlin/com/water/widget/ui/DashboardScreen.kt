@@ -6,7 +6,6 @@ import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.animateBounds
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.spring
-import androidx.compose.foundation.Image
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -45,10 +44,12 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowForwardIos
+import androidx.compose.material.icons.automirrored.filled.OpenInNew
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.AccountBalanceWallet
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.Code
 import androidx.compose.material.icons.filled.DeleteOutline
 import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.Home
@@ -78,8 +79,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
-import androidx.compose.ui.layout.ContentScale
-import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -687,7 +687,7 @@ private fun MineTab(
     SettingsRow(
         icon = Icons.Default.Favorite,
         title = "支持开发者",
-        subtitle = "喜欢这个应用？欢迎请我喝杯水",
+        subtitle = "喜欢这个应用？到 GitHub 点个 Star",
         onClick = onOpenSupport
     )
     Text(
@@ -773,29 +773,16 @@ private fun AccountSwitcherDialog(accounts: List<DashboardAccountUiState>, onDis
 
 @Composable
 private fun SupportDeveloperDialog(onDismiss: () -> Unit) {
-    var selectedMethod by rememberSaveable { mutableStateOf(SupportMethod.WECHAT) }
+    val uriHandler = LocalUriHandler.current
     AlertDialog(
         onDismissRequest = onDismiss,
         icon = { Icon(Icons.Default.Favorite, contentDescription = null, tint = MaterialTheme.colorScheme.tertiary) },
         title = { Text("支持开发者", fontWeight = FontWeight.Bold) },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                Text("如果这个应用对你有帮助，欢迎请我喝杯水。感谢你的支持！", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 13.sp)
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
-                    SupportMethod.entries.forEach { method ->
-                        val selected = method == selectedMethod
-                        if (selected) {
-                            Button(onClick = { selectedMethod = method }, modifier = Modifier.weight(1f), shape = RoundedCornerShape(14.dp)) {
-                                Text(method.label)
-                            }
-                        } else {
-                            OutlinedButton(onClick = { selectedMethod = method }, modifier = Modifier.weight(1f), shape = RoundedCornerShape(14.dp)) {
-                                Text(method.label)
-                            }
-                        }
-                    }
-                }
-                SupportQrCode(label = selectedMethod.label, imageRes = selectedMethod.imageRes)
+                Text("喜欢这个应用的话，欢迎到 GitHub 点个 Star 支持开发者。", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 13.sp)
+                RepoLink("本改版仓库", "wasdwx/life-798") { runCatching { uriHandler.openUri(it) } }
+                RepoLink("原作者仓库", "nocookies111/life-798") { runCatching { uriHandler.openUri(it) } }
             }
         },
         confirmButton = {
@@ -807,30 +794,21 @@ private fun SupportDeveloperDialog(onDismiss: () -> Unit) {
     )
 }
 
-private enum class SupportMethod(val label: String, val imageRes: Int) {
-    WECHAT("微信赞赏", R.drawable.reward_wechat),
-    ALIPAY("支付宝赞赏", R.drawable.reward_alipay)
-}
-
 @Composable
-private fun SupportQrCode(label: String, imageRes: Int) {
+private fun RepoLink(label: String, repo: String, onOpen: (String) -> Unit) {
     Surface(
-        modifier = Modifier.fillMaxWidth(),
+        onClick = { onOpen("https://github.com/$repo") },
         shape = RoundedCornerShape(16.dp),
-        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.68f)
+        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.68f),
+        modifier = Modifier.fillMaxWidth()
     ) {
-        Column(
-            modifier = Modifier.padding(10.dp),
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.spacedBy(7.dp)
-        ) {
-            Image(
-                painter = painterResource(imageRes),
-                contentDescription = label,
-                contentScale = ContentScale.Fit,
-                modifier = Modifier.fillMaxWidth().height(228.dp).clip(RoundedCornerShape(10.dp))
-            )
-            Text("使用${label}扫码", fontWeight = FontWeight.SemiBold, fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurface)
+        Row(Modifier.padding(13.dp), verticalAlignment = Alignment.CenterVertically) {
+            Icon(Icons.Default.Code, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+            Column(Modifier.weight(1f).padding(start = 10.dp)) {
+                Text(label, fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
+                Text(repo, color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 12.sp)
+            }
+            Icon(Icons.AutoMirrored.Filled.OpenInNew, contentDescription = "打开", tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(16.dp))
         }
     }
 }
