@@ -1,9 +1,11 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- 宽条组合：最小 4×1，可拉高到 4×2 自动显示信息行（见 ComboWidgetProvider 的尺寸映射）。
+<!-- 宽条组合：默认 4×1，支持缩窄和拉高，按实际宽高显示信息。
      不使用 android:configure，避免 HyperOS 添加失败。 -->
 <appwidget-provider xmlns:android="http://schemas.android.com/apk/res/android"
     android:minWidth="250dp"
     android:minHeight="40dp"
+    android:minResizeWidth="160dp"
+    android:minResizeHeight="40dp"
     android:updatePeriodMillis="0"
     android:initialLayout="@layout/widget_combo_compact"
     android:previewLayout="@layout/widget_combo"

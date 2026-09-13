@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- 1×1 起步，可拉到任意大小：1×1 只有图标，2×1 横排一行，2×2 及以上竖排三行，
-     由 WidgetSupport.tileViews 的尺寸映射自动挑档。不使用 android:configure，避免 HyperOS 添加失败。 -->
+<!-- 1×1 起步，按实际宽高补充状态和详情，支持横条和窄高尺寸。
+     不使用 android:configure，避免 HyperOS 添加失败。 -->
 <appwidget-provider xmlns:android="http://schemas.android.com/apk/res/android"
     android:minWidth="40dp"
     android:minHeight="40dp"

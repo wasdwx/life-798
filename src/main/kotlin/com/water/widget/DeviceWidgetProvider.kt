@@ -5,6 +5,7 @@ import android.appwidget.AppWidgetProvider
 import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
+import android.os.Bundle
 
 /** 方块小部件：整块点击即启动默认设备。1×1 起步，拉大自动换更详细的档，见 WidgetSupport.tileViews。 */
 class DeviceWidgetProvider : AppWidgetProvider() {
@@ -14,6 +15,9 @@ class DeviceWidgetProvider : AppWidgetProvider() {
         appWidgetManager: AppWidgetManager,
         appWidgetIds: IntArray
     ) = push(context, appWidgetManager, appWidgetIds, null)
+
+    override fun onAppWidgetOptionsChanged(context: Context, manager: AppWidgetManager, id: Int, options: Bundle) =
+        onUpdate(context, manager, intArrayOf(id))
 
     override fun onReceive(context: Context, intent: Intent) {
         super.onReceive(context, intent)
@@ -32,15 +36,15 @@ class DeviceWidgetProvider : AppWidgetProvider() {
         val info = WidgetSupport.readInfo(context)
         // 空闲时显示设备名比显示「待机」有用；会话进行中才让位给实时状态
         val idle = info.deviceName.takeIf { info.deviceStatus == "待机" } ?: info.deviceStatus
-        val views = WidgetSupport.tileViews(
-            context, DeviceWidgetProvider::class.java, ACTION_START_DEVICE, REQ,
+        ids.forEach { id -> manager.updateAppWidget(id, WidgetSupport.tileViews(
+            context, id, DeviceWidgetProvider::class.java, ACTION_START_DEVICE, REQ,
             iconRes = R.drawable.ic_water_drop,
             title = "启动设备",
             status = override ?: idle,
             compact = override ?: info.deviceCompact,
+            detail = if (info.deviceStatus == "待机") info.usageText else "${info.deviceName}\n${info.usageText}",
             hue = ThemeSettings.widgetStyle(context).deviceHue
-        )
-        ids.forEach { manager.updateAppWidget(it, views) }
+        )) }
     }
 
     companion object {

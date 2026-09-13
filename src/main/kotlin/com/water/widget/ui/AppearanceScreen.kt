@@ -100,7 +100,7 @@ fun AppearanceScreen(
             }
         }
 
-        SectionCard("桌面小部件", "小部件跟随系统深浅色。文字始终不透明，只有背景吃透明度。") {
+        SectionCard("桌面小部件", "小部件跟随系统深浅色。透明度作用于卡片和按钮背景，文字与图标保持清晰。") {
             WidgetPreview(draft)
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                 Text("背景不透明度", fontWeight = FontWeight.Medium, fontSize = 14.sp)

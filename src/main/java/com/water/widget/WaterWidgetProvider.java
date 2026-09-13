@@ -5,7 +5,12 @@ import android.appwidget.AppWidgetManager;
 import android.appwidget.AppWidgetProvider;
 import android.content.Context;
 import android.content.Intent;
+import android.os.Bundle;
+import android.util.SizeF;
+import android.view.View;
 import android.widget.RemoteViews;
+
+import java.util.Arrays;
 
 /**
  * 桌面小部件 Provider。
@@ -23,6 +28,11 @@ public class WaterWidgetProvider extends AppWidgetProvider {
         for (int id : appWidgetIds) {
             appWidgetManager.updateAppWidget(id, buildViews(context, id, null));
         }
+    }
+
+    @Override
+    public void onAppWidgetOptionsChanged(Context context, AppWidgetManager manager, int id, Bundle options) {
+        onUpdate(context, manager, new int[]{id});
     }
 
     @Override
@@ -55,8 +65,16 @@ public class WaterWidgetProvider extends AppWidgetProvider {
     }
 
     static RemoteViews buildViews(Context context, int widgetId, String status) {
+        return WidgetSupport.responsiveViews(context, widgetId,
+                Arrays.asList(new SizeF(300f, 110f), new SizeF(300f, 180f)),
+                size -> buildLayout(context, widgetId, status, size));
+    }
+
+    static RemoteViews buildLayout(Context context, int widgetId, String status, SizeF size) {
         boolean configured = WaterApi.isConfigured(context);
         RemoteViews views = new RemoteViews(context.getPackageName(), R.layout.widget_water);
+        float fontScale = Math.max(1f, context.getResources().getConfiguration().fontScale);
+        views.setViewVisibility(R.id.widget_header, size.getHeight() >= 150f * fontScale ? View.VISIBLE : View.GONE);
         // 经典小部件只吃不透明度，渐变大按钮不做颜色自定义
         WidgetSupport.tintSurface(views, context, R.color.widget_bg,
                 ThemeSettings.INSTANCE.widgetStyle(context).getOpacity());
@@ -70,10 +88,15 @@ public class WaterWidgetProvider extends AppWidgetProvider {
             views.setTextViewText(R.id.widget_status, "未配置 · 点击设置");
         } else {
             String did = WaterApi.getDid(context);
+            Account account = AccountStore.getCurrent(context);
+            if (account != null) {
+                views.setTextViewText(R.id.widget_device_name, account.deviceDisplayName(did));
+            }
             views.setOnClickPendingIntent(R.id.btn_start,
                     buildPI(context, widgetId, did));
+            String activeStatus = WaterService.activeStatus();
             views.setTextViewText(R.id.widget_status,
-                    status != null ? status : "点击启动当前设备");
+                    status != null ? status : activeStatus != null ? activeStatus : "点击启动当前设备");
         }
         return views;
     }

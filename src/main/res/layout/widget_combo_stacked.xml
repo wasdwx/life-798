@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- 组合小部件详细布局：设备名与用水各占一行，按钮可按宽高切换横排或竖排。
+<!-- 窄高组合小部件：设备名与用水在顶部，两个按钮纵向均分剩余空间。
      根布局用 @android:id/background 让 HyperOS 正确裁圆角。 -->
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:tools="http://schemas.android.com/tools"
@@ -56,14 +56,14 @@
         android:layout_width="match_parent"
         android:layout_height="0dp"
         android:layout_weight="1"
-        android:orientation="horizontal">
+        android:orientation="vertical">
 
         <LinearLayout
             android:id="@+id/combo_btn_device"
-            android:layout_width="0dp"
-            android:layout_height="match_parent"
+            android:layout_width="match_parent"
+            android:layout_height="0dp"
             android:layout_weight="1"
-            android:layout_marginEnd="5dp"
+            android:layout_marginBottom="4dp"
             android:orientation="horizontal"
             android:gravity="center"
             android:paddingStart="12dp"
@@ -120,10 +120,10 @@
 
         <LinearLayout
             android:id="@+id/combo_btn_task"
-            android:layout_width="0dp"
-            android:layout_height="match_parent"
+            android:layout_width="match_parent"
+            android:layout_height="0dp"
             android:layout_weight="1"
-            android:layout_marginStart="5dp"
+            android:layout_marginTop="4dp"
             android:orientation="horizontal"
             android:gravity="center"
             android:paddingStart="12dp"

@@ -1,6 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- 方块小部件 2×1 档：横排图标加一行文字。高度只够一行，所以空闲显示动作名、
-     运行中显示状态，与组合小部件 4×1 同一逻辑。默认值仅供预览，见 widget_tile_1x1。 -->
+<!-- 横向小部件：高度足够时在动作名下补充状态与详情，由 WidgetSupport 控制可见性。 -->
 <FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:tools="http://schemas.android.com/tools"
     android:id="@android:id/background"
@@ -27,16 +26,57 @@
             android:tint="@color/widget_on_device_container"
             tools:ignore="ContentDescription,UseAppTint" />
 
-        <TextView
-            android:id="@+id/tile_title"
+        <LinearLayout
             android:layout_width="0dp"
             android:layout_height="wrap_content"
             android:layout_weight="1"
-            android:text="启动设备"
-            android:textSize="13sp"
-            android:textStyle="bold"
-            android:textColor="@color/widget_on_device_container"
-            android:singleLine="true"
-            android:ellipsize="end" />
+            android:orientation="vertical">
+
+            <TextView
+                android:id="@+id/tile_title"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="启动设备"
+                android:textSize="14sp"
+                android:textStyle="bold"
+                android:textColor="@color/widget_on_device_container"
+                android:includeFontPadding="false"
+                android:autoSizeTextType="uniform"
+                android:autoSizeMinTextSize="11sp"
+                android:autoSizeMaxTextSize="14sp"
+                android:maxLines="1"
+                android:ellipsize="end" />
+
+            <TextView
+                android:id="@+id/tile_status"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="3dp"
+                android:text="待机"
+                android:textSize="12sp"
+                android:textColor="@color/widget_on_device_container"
+                android:includeFontPadding="false"
+                android:autoSizeTextType="uniform"
+                android:autoSizeMinTextSize="11sp"
+                android:autoSizeMaxTextSize="12sp"
+                android:maxLines="1"
+                android:ellipsize="end" />
+
+            <TextView
+                android:id="@+id/tile_detail"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="3dp"
+                android:text="今日暂无用水"
+                android:textSize="12sp"
+                android:textColor="@color/widget_on_device_container"
+                android:includeFontPadding="false"
+                android:autoSizeTextType="uniform"
+                android:autoSizeMinTextSize="11sp"
+                android:autoSizeMaxTextSize="12sp"
+                android:maxLines="2"
+                android:ellipsize="end"
+                android:visibility="gone" />
+        </LinearLayout>
     </LinearLayout>
 </FrameLayout>

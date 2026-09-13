@@ -1,7 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- 宽条组合 4×1：高度只够一行，省掉设备名与用水统计。
-     按钮 id 与 widget_combo.xml 一致，Provider 绑定点击时无需按尺寸分支；
-     状态文字直接写进按钮唯一那行（此尺寸没有第二行可用）。 -->
+<!-- 扁条组合：最矮时只显示动作或进度，稍高时补充设备名和积分状态。 -->
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:tools="http://schemas.android.com/tools"
     android:id="@android:id/background"
@@ -33,17 +31,43 @@
             android:tint="@color/widget_on_device_container"
             tools:ignore="ContentDescription,UseAppTint" />
 
-        <TextView
-            android:id="@+id/combo_device_status"
+        <LinearLayout
             android:layout_width="0dp"
             android:layout_height="wrap_content"
             android:layout_weight="1"
-            android:text="启动设备"
-            android:textSize="13sp"
-            android:textStyle="bold"
-            android:textColor="@color/widget_on_device_container"
-            android:singleLine="true"
-            android:ellipsize="end" />
+            android:orientation="vertical">
+
+            <TextView
+                android:id="@+id/combo_title_device"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="启动设备"
+                android:textSize="14sp"
+                android:textStyle="bold"
+                android:textColor="@color/widget_on_device_container"
+                android:includeFontPadding="false"
+                android:autoSizeTextType="uniform"
+                android:autoSizeMinTextSize="11sp"
+                android:autoSizeMaxTextSize="14sp"
+                android:maxLines="1"
+                android:ellipsize="end"
+                android:visibility="gone" />
+
+            <TextView
+                android:id="@+id/combo_device_status"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="启动设备"
+                android:textSize="13sp"
+                android:textStyle="bold"
+                android:textColor="@color/widget_on_device_container"
+                android:includeFontPadding="true"
+                android:autoSizeTextType="uniform"
+                android:autoSizeMinTextSize="11sp"
+                android:autoSizeMaxTextSize="13sp"
+                android:maxLines="1"
+                android:ellipsize="end" />
+        </LinearLayout>
     </LinearLayout>
 
     <LinearLayout
@@ -68,16 +92,42 @@
             android:tint="@color/widget_on_task_container"
             tools:ignore="ContentDescription,UseAppTint" />
 
-        <TextView
-            android:id="@+id/combo_task_status"
+        <LinearLayout
             android:layout_width="0dp"
             android:layout_height="wrap_content"
             android:layout_weight="1"
-            android:text="积分任务"
-            android:textSize="13sp"
-            android:textStyle="bold"
-            android:textColor="@color/widget_on_task_container"
-            android:singleLine="true"
-            android:ellipsize="end" />
+            android:orientation="vertical">
+
+            <TextView
+                android:id="@+id/combo_title_task"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="积分任务"
+                android:textSize="14sp"
+                android:textStyle="bold"
+                android:textColor="@color/widget_on_task_container"
+                android:includeFontPadding="false"
+                android:autoSizeTextType="uniform"
+                android:autoSizeMinTextSize="11sp"
+                android:autoSizeMaxTextSize="14sp"
+                android:maxLines="1"
+                android:ellipsize="end"
+                android:visibility="gone" />
+
+            <TextView
+                android:id="@+id/combo_task_status"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="积分任务"
+                android:textSize="13sp"
+                android:textStyle="bold"
+                android:textColor="@color/widget_on_task_container"
+                android:includeFontPadding="true"
+                android:autoSizeTextType="uniform"
+                android:autoSizeMinTextSize="11sp"
+                android:autoSizeMaxTextSize="13sp"
+                android:maxLines="1"
+                android:ellipsize="end" />
+        </LinearLayout>
     </LinearLayout>
 </LinearLayout>
