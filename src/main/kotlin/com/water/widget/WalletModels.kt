@@ -45,6 +45,13 @@ data class AlipayResult(
 )
 
 object WalletResponseParser {
+    fun dashboardBalance(response: JSONObject, endpointId: String?): Double? {
+        val wallets = parseWallets(response)
+        if (wallets.isEmpty()) return 0.0
+        return (wallets.singleOrNull { it.endpointId == endpointId }
+            ?: wallets.singleOrNull())?.balance
+    }
+
     fun parseWallets(response: JSONObject): List<RechargeWallet> {
         val data = successData(response) as? JSONObject
             ?: throw IllegalArgumentException("钱包响应缺少 data")
@@ -92,9 +99,8 @@ object WalletResponseParser {
             ?: throw IllegalArgumentException("钱包缺少端点信息")
         val owner = wallet.optJSONObject("owner")
             ?: throw IllegalArgumentException("钱包缺少用户信息")
-        val total = wallet.optionalNumber("total") ?: 0.0
-        val balance = wallet.optionalNumber("olCash")
-            ?: total.takeIf { it > 0.0 }
+        val balance = wallet.optionalNumber("total")
+            ?: wallet.optionalNumber("olCash")
             ?: (wallet.optionalNumber("balance") ?: 0.0)
         return RechargeWallet(
             endpointId = endpoint.requiredString("id", "钱包缺少端点 ID"),
@@ -169,5 +175,46 @@ object AlipayResultParser {
                 if (memo.isBlank()) "支付失败" else "支付失败：$memo"
             )
         }
+    }
+}
+
+object ScoreExchangeParser {
+    val amounts = listOf(100, 1000)
+
+    fun requestBody(endpointId: String, score: Int): JSONObject {
+        require(endpointId.isNotBlank())
+        require(score > 0 && score % 100 == 0)
+        return JSONObject()
+            .put("ep", JSONObject().put("id", endpointId))
+            .put("score", score)
+            .put("type", 1)
+    }
+
+    fun totalScore(unitScore: Int, quantity: Int, available: Int): Int? {
+        if (unitScore !in amounts || quantity <= 0 || quantity > available / unitScore) return null
+        return unitScore * quantity
+    }
+
+    fun availableScore(response: JSONObject): Int {
+        val value = data(response).opt("score")
+        return value?.toString()?.toIntOrNull()?.takeIf { it >= 0 }
+            ?: throw IllegalArgumentException("可用积分格式错误")
+    }
+
+    fun billId(response: JSONObject): String =
+        data(response).optString("sn", "").takeIf { it.isNotBlank() && it != "null" }
+            ?: throw IllegalArgumentException("兑换响应缺少账单号")
+
+    fun isCompleted(response: JSONObject, expectedBillId: String): Boolean {
+        val bill = data(response).optJSONObject("bill")
+            ?: throw IllegalArgumentException("兑换账单缺失")
+        require(bill.optString("id") == expectedBillId) { "兑换账单不匹配" }
+        return bill.optInt("status", -1) == 3
+    }
+
+    private fun data(response: JSONObject): JSONObject {
+        require(response.optInt("code", -1) == 0) { "接口未返回成功结果" }
+        return response.optJSONObject("data")
+            ?: throw IllegalArgumentException("接口响应缺少 data")
     }
 }

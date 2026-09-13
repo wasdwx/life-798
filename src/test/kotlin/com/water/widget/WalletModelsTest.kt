@@ -9,7 +9,7 @@ import org.junit.Test
 
 class WalletModelsTest {
     @Test
-    fun `钱包响应按端点和用户去重并沿用当前余额优先级`() {
+    fun `钱包响应按端点和用户去重并优先使用总余额`() {
         val primary = wallet("endpoint-1", "主钱包", "owner-1")
             .put("olCash", 12.5)
             .put("total", 99)
@@ -31,11 +31,22 @@ class WalletModelsTest {
 
         assertEquals(3, wallets.size)
         assertEquals("endpoint-1", wallets[0].endpointId)
-        assertEquals(12.5, wallets[0].balance, 0.0)
+        assertEquals(99.0, wallets[0].balance, 0.0)
         assertEquals("endpoint-2", wallets[1].endpointId)
         assertEquals(7.25, wallets[1].balance, 0.0)
         assertEquals("endpoint-3", wallets[2].endpointId)
-        assertEquals(4.5, wallets[2].balance, 0.0)
+        assertEquals(0.0, wallets[2].balance, 0.0)
+    }
+
+    @Test
+    fun `首页只取对应钱包且不重复合并不同端点`() {
+        val first = wallet("ep-1", "钱包一", "owner").put("total", 5.0)
+        val second = wallet("ep-2", "钱包二", "owner").put("total", 2.0)
+        val single = success(JSONObject().put("aw", first).put("eps", JSONArray().put(first)))
+        assertEquals(5.0, WalletResponseParser.dashboardBalance(single, "unknown")!!, 0.0)
+        val multiple = success(JSONObject().put("aw", first).put("eps", JSONArray().put(first).put(second)))
+        assertEquals(2.0, WalletResponseParser.dashboardBalance(multiple, "ep-2")!!, 0.0)
+        assertEquals(null, WalletResponseParser.dashboardBalance(multiple, "unknown"))
     }
 
     @Test
@@ -133,6 +144,25 @@ class WalletModelsTest {
             AlipayResultKind.FAILED,
             AlipayResultParser.parse(mapOf("resultStatus" to "4000", "memo" to "订单支付失败")).kind
         )
+    }
+
+    @Test
+    fun `积分兑换金额计入钱包总余额`() {
+        val entry = wallet("endpoint-1", "主钱包", "owner-1")
+            .put("olCash", 0)
+            .put("olGift", 5)
+            .put("total", 5)
+        val wallets = WalletResponseParser.parseWallets(success(JSONObject().put("aw", entry)))
+
+        assertEquals(5.0, wallets.single().balance, 0.0)
+    }
+
+    @Test
+    fun `总余额缺失时保留现金余额回退`() {
+        val entry = wallet("endpoint-1", "主钱包", "owner-1").put("olCash", 3)
+        val wallets = WalletResponseParser.parseWallets(success(JSONObject().put("aw", entry)))
+
+        assertEquals(3.0, wallets.single().balance, 0.0)
     }
 
     private fun success(data: Any): JSONObject = JSONObject()

@@ -213,18 +213,26 @@ class ConfigActivity : ComponentActivity() {
         }
         IlifeApi.missionLstWithToken(token) { missionJson, _ ->
             IlifeApi.scoreLstWithToken(token) { scoreJson, _ ->
-                runOnUiThread {
-                    if (destroyed) return@runOnUiThread
-                    if (
-                        generation == scoreGeneration &&
-                        AccountStore.getCurrent(this)?.phone == accountPhone
-                    ) {
-                        val score = missionJson?.optJSONObject("data")
-                            ?.optJSONObject("accScoreRsp")
-                            ?.optInt("validScore")
-                        viewModel.setCurrentScoreData(score, scoreJson)
+                val walletToken = account.appToken?.takeIf { it.isNotBlank() } ?: token
+                IlifeApi.walletOwnerWithToken(walletToken) { walletJson, _ ->
+                    val balance = try {
+                        walletJson?.let { WalletResponseParser.dashboardBalance(it, account.eid) }
+                    } catch (_: IllegalArgumentException) {
+                        null
                     }
-                    onComplete()
+                    runOnUiThread {
+                        if (destroyed) return@runOnUiThread
+                        if (
+                            generation == scoreGeneration &&
+                            AccountStore.getCurrent(this)?.phone == accountPhone
+                        ) {
+                            val score = missionJson?.optJSONObject("data")
+                                ?.optJSONObject("accScoreRsp")
+                                ?.optInt("validScore")
+                            viewModel.setCurrentScoreData(score, scoreJson, balance)
+                        }
+                        onComplete()
+                    }
                 }
             }
         }

@@ -239,6 +239,23 @@ public class IlifeApi {
         requestApp("GET", "/acc/wallet/owner", null, appToken, cb);
     }
 
+    /** 使用设备登录信息读取可用积分。 */
+    public static void accountScoreWithToken(final String appToken, final JsonCallback cb) {
+        requestApp("GET", "/acc/score/acc-score", null, appToken, cb);
+    }
+
+    /** 兑换仅提交一次；网络结果不明确时由调用方核验，不自动重试。 */
+    public static void exchangeScoreWithToken(final String appToken, final String endpointId,
+                                              final int score, final JsonCallback cb) {
+        requestApp("POST", "/acc/score/score-use",
+                ScoreExchangeParser.INSTANCE.requestBody(endpointId, score), appToken, cb);
+    }
+
+    public static void exchangeBillWithToken(final String appToken, final String billId,
+                                             final JsonCallback cb) {
+        requestApp("GET", "/bill/view-full?id=" + enc(billId), null, appToken, cb);
+    }
+
     /** 获取指定钱包端点的充值产品。 */
     public static void rechargeProductsWithToken(final String appToken,
                                                  final String endpointId,

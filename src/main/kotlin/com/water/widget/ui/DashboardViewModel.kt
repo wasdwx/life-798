@@ -26,6 +26,7 @@ class DashboardViewModel(application: Application) : AndroidViewModel(applicatio
     val uiState: StateFlow<DashboardUiState> = _uiState.asStateFlow()
 
     private var currentScore: Int? = null
+    private var currentWalletBalance: Double? = null
     private var currentScoreLogs: JSONObject? = null
     private var homeRefreshing = false
     private var deviceSyncing = false
@@ -42,12 +43,14 @@ class DashboardViewModel(application: Application) : AndroidViewModel(applicatio
     fun reloadAccounts(resetScore: Boolean = false) {
         if (resetScore) {
             currentScore = null
+            currentWalletBalance = null
             currentScoreLogs = null
         }
         publish()
     }
 
-    fun setCurrentScoreData(score: Int?, logs: JSONObject?) {
+    fun setCurrentScoreData(score: Int?, logs: JSONObject?, walletBalance: Double? = null) {
+        currentWalletBalance = walletBalance
         currentScore = score
         currentScoreLogs = logs
         publish()
@@ -68,6 +71,7 @@ class DashboardViewModel(application: Application) : AndroidViewModel(applicatio
         val account = AccountStore.get(storeContext, phone) ?: return null
         AccountStore.setCurrent(storeContext, account.phone)
         currentScore = null
+        currentWalletBalance = null
         currentScoreLogs = null
         publish()
         return account
@@ -91,7 +95,8 @@ class DashboardViewModel(application: Application) : AndroidViewModel(applicatio
                     accounts.size,
                     currentScore,
                     currentScoreLogs,
-                    usageOverride = usage
+                    usageOverride = usage,
+                    walletBalance = currentWalletBalance
                 ),
                 accounts = DashboardUiStateFactory.accountsFrom(accounts, current?.phone),
                 tasks = TaskUiStateFactory.from(

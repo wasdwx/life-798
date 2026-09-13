@@ -49,6 +49,7 @@ class UsageHistoryLedgerTest {
                 JSONArray().put(
                     JSONObject()
                         .put("id", "nested-spend")
+                        .put("type", 107)
                         .put("ctime", now.timeInMillis)
                         .put("score", 0)
                         .put("data", JSONObject().put("spend", 160))
@@ -94,6 +95,28 @@ class UsageHistoryLedgerTest {
         assertFalse(restored.merge(response(now.timeInMillis, 160, "different-score-record")))
         assertTrue(restored.merge(response(now.timeInMillis + 1_000L, 160, "future-score-record")))
         assertEquals("¥0.32", restored.toUiState(now).todayCostText)
+    }
+
+    @Test
+    fun `兑换抽奖不计用水且撤销旧误计仅一次`() {
+        val now = Calendar.getInstance()
+        val water = response(now.timeInMillis, 180, "water").getJSONArray("data").getJSONObject(0)
+        val exchange = response(now.timeInMillis, 100, "exchange").getJSONArray("data").getJSONObject(0).put("type", 105)
+        val lottery = response(now.timeInMillis, 50, "lottery").getJSONArray("data").getJSONObject(0).put("type", 106)
+        val json = JSONObject().put("code", 0).put("data", JSONArray().put(water).put(exchange).put(lottery))
+        val fresh = UsageHistoryLedger()
+        fresh.merge(json)
+        assertEquals("¥0.18", fresh.toUiState(now).todayCostText)
+        val old = UsageHistoryLedger()
+        old.recordLocal("water", now.timeInMillis, 180)
+        old.recordLocal("exchange", now.timeInMillis, 100)
+        old.recordLocal("lottery", now.timeInMillis, 50)
+        val restored = UsageHistoryLedger.fromJson(old.toJson())
+        assertTrue(restored.merge(json))
+        assertEquals("¥0.18", restored.toUiState(now).todayCostText)
+        val again = UsageHistoryLedger.fromJson(restored.toJson())
+        assertFalse(again.merge(json))
+        assertEquals("¥0.18", again.toUiState(now).todayCostText)
     }
 
     private fun response(time: Long, spend: Int, id: String) = JSONObject()

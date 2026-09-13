@@ -16,7 +16,8 @@ class DashboardUiStateFactoryTest {
         val accounts = DashboardUiStateFactory.accountsFrom(listOf(account), account.phone)
         val state = DashboardUiState(summary, accounts)
 
-        assertEquals("1200", state.summary.scoreTitle)
+        assertEquals("--", state.summary.scoreTitle)
+        assertTrue(state.summary.scoreSubtitle.contains("钱包未获取"))
         assertEquals("积分登录已完成 · 设备登录未完成", state.summary.accountSubtitle)
         assertEquals(1, state.accounts.size)
         assertTrue(state.accounts.single().isCurrent)
@@ -29,7 +30,7 @@ class DashboardUiStateFactoryTest {
         assertEquals("未登录", state.accountTitle)
         assertEquals("完成设备登录后即可使用设备", state.accountSubtitle)
         assertEquals("--", state.scoreTitle)
-        assertEquals("暂无积分", state.scoreSubtitle)
+        assertEquals("登录后查看积分与钱包", state.scoreSubtitle)
         assertFalse(state.hasAccount)
         assertFalse(state.hasAppToken)
         assertFalse(state.hasDevices)
@@ -47,12 +48,12 @@ class DashboardUiStateFactoryTest {
             selectDevice("device-001")
         }
 
-        val state = DashboardUiStateFactory.from(account, 2, 2380)
+        val state = DashboardUiStateFactory.from(account, 2, 2380, walletBalance = 5.0)
 
         assertEquals("测试账户", state.accountTitle)
         assertEquals("设备与积分登录均已完成", state.accountSubtitle)
-        assertEquals("2380", state.scoreTitle)
-        assertEquals("≈2.38元可用", state.scoreSubtitle)
+        assertEquals("≈¥7.38", state.scoreTitle)
+        assertEquals("钱包 ¥5.00  +  积分 2380（≈¥2.38）", state.scoreSubtitle)
         assertTrue(state.hasAccount)
         assertTrue(state.hasAppToken)
         assertTrue(state.hasDevices)
@@ -111,6 +112,16 @@ class DashboardUiStateFactoryTest {
         assertEquals("780 ml", state.usage.todayWaterText)
         assertEquals("780 ml", state.usage.monthWaterText)
         assertEquals("1.3 L", state.usage.yearWaterText)
+    }
+
+    @Test
+    fun `兑换前后总额度不变且未知余额不冒充零`() {
+        val account = Account("示例账户")
+        val before = DashboardUiStateFactory.from(account, 1, 2055, walletBalance = 5.0)
+        val after = DashboardUiStateFactory.from(account, 1, 1955, walletBalance = 5.1)
+        assertEquals("≈¥7.06", before.scoreTitle)
+        assertEquals(before.scoreTitle, after.scoreTitle)
+        assertEquals("--", DashboardUiStateFactory.from(account, 1, walletBalance = 5.0).scoreTitle)
     }
 
     @Test

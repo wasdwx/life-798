@@ -13,6 +13,7 @@ import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.asPaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -34,6 +35,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -41,9 +43,11 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.unit.dp
@@ -56,6 +60,7 @@ import java.util.Locale
 
 class WalletActivity : ComponentActivity() {
     private var state by mutableStateOf(WalletUiState())
+    private var scoreGeneration = 0
     private var hasLoaded = false
     private var lastAccountKey = ""
     @Volatile private var destroyed = false
@@ -99,11 +104,12 @@ class WalletActivity : ComponentActivity() {
             errorMessage = null,
             statusMessage = null
         )
+        refreshAvailableScore(appToken)
         IlifeApi.walletOwnerWithToken(appToken) { response, error ->
             runOnUiThread {
                 if (!canContinue()) return@runOnUiThread
                 if (response == null) {
-                    showError("加载钱包失败：${error ?: "网络错误"}")
+                    showError(listOfNotNull(messageAfterRefresh, "加载钱包失败：${error ?: "网络错误"}").joinToString("；"))
                     return@runOnUiThread
                 }
                 try {
@@ -135,10 +141,10 @@ class WalletActivity : ComponentActivity() {
                             statusMessage = messageAfterRefresh,
                             errorMessage = null
                         )
-                        loadProducts(appToken, selectedWallet)
+                        loadProducts(appToken, selectedWallet, messageAfterRefresh)
                     }
                 } catch (e: IllegalArgumentException) {
-                    showError(e.message ?: "钱包响应格式错误")
+                    showError(listOfNotNull(messageAfterRefresh, e.message ?: "钱包响应格式错误").joinToString("；"))
                 }
             }
         }
@@ -164,12 +170,12 @@ class WalletActivity : ComponentActivity() {
         loadProducts(appToken, wallet)
     }
 
-    private fun loadProducts(appToken: String, wallet: RechargeWallet) {
+    private fun loadProducts(appToken: String, wallet: RechargeWallet, resultMessage: String? = null) {
         IlifeApi.rechargeProductsWithToken(appToken, wallet.endpointId) { response, error ->
             runOnUiThread {
                 if (!canContinue()) return@runOnUiThread
                 if (response == null) {
-                    showError("加载充值金额失败：${error ?: "网络错误"}")
+                    showError(listOfNotNull(resultMessage, "加载充值金额失败：${error ?: "网络错误"}").joinToString("；"))
                     return@runOnUiThread
                 }
                 try {
@@ -180,7 +186,109 @@ class WalletActivity : ComponentActivity() {
                         errorMessage = null
                     )
                 } catch (e: IllegalArgumentException) {
-                    showError(e.message ?: "充值产品响应格式错误")
+                    showError(listOfNotNull(resultMessage, e.message ?: "充值产品响应格式错误").joinToString("；"))
+                }
+            }
+        }
+    }
+
+    private fun refreshAvailableScore(appToken: String) {
+        val generation = ++scoreGeneration
+        state = state.copy(availableScore = null, scoreLoading = true, scoreError = null)
+        IlifeApi.accountScoreWithToken(appToken) { response, _ ->
+            runOnUiThread {
+                if (!canContinue() || generation != scoreGeneration) return@runOnUiThread
+                val score = try {
+                    response?.let(ScoreExchangeParser::availableScore)
+                } catch (_: IllegalArgumentException) {
+                    null
+                }
+                state = state.copy(
+                    availableScore = score,
+                    scoreLoading = false,
+                    scoreError = if (score == null) "可用积分加载失败，请下拉刷新后重试" else null
+                )
+            }
+        }
+    }
+
+    private fun startExchange(quantity: Int) {
+        val unitScore = state.exchangeScore ?: return
+        state = state.copy(exchangeScore = null)
+        if (state.loading || state.exchangeInProgress) return
+        val score = ScoreExchangeParser.totalScore(unitScore, quantity, state.availableScore ?: 0)
+        if (score == null) {
+            state = state.copy(exchangeMessage = "份数无效或积分不足，请重新选择")
+            return
+        }
+        val account = AccountStore.getCurrent(this) ?: return
+        val appToken = account.appToken.orEmpty()
+        if ("${account.phone.orEmpty()}\u0000$appToken" != lastAccountKey) {
+            loadWallets("账户已变化，请重新选择兑换钱包")
+            return
+        }
+        val wallet = state.wallets.firstOrNull {
+            it.endpointId == state.selectedEndpointId && it.ownerId == state.selectedOwnerId
+        } ?: return
+        state = state.copy(exchangeInProgress = true, exchangeMessage = "正在兑换并更新余额，请稍候…")
+        IlifeApi.exchangeScoreWithToken(appToken, wallet.endpointId, score) { response, _ ->
+            runOnUiThread {
+                if (!canContinue()) return@runOnUiThread
+                if (response != null && response.has("code") && response.optInt("code", -1) != 0) {
+                    refreshAfterExchange(appToken, "兑换未成功：${response.optString("msg", "请刷新后核对积分")}")
+                    return@runOnUiThread
+                }
+                val billId = try {
+                    response?.let(ScoreExchangeParser::billId)
+                } catch (_: IllegalArgumentException) {
+                    null
+                }
+                if (billId == null) {
+                    refreshAfterExchange(appToken, "兑换结果待确认，请先核对官方记录，勿重复兑换")
+                    return@runOnUiThread
+                }
+                IlifeApi.exchangeBillWithToken(appToken, billId) { billResponse, _ ->
+                    runOnUiThread {
+                        if (!canContinue()) return@runOnUiThread
+                        val completed = try {
+                            billResponse?.let { ScoreExchangeParser.isCompleted(it, billId) } == true
+                        } catch (_: IllegalArgumentException) {
+                            false
+                        }
+                        refreshAfterExchange(appToken,
+                            if (completed) "兑换已完成，¥${(score / 1000.0).money()} 已兑换至「${wallet.name}」"
+                            else "兑换结果待确认，请先核对官方记录，勿重复兑换"
+                        )
+                    }
+                }
+            }
+        }
+    }
+
+    /** 兑换只更新余额和积分，不重载充值产品，也不改变页面加载布局。 */
+    private fun refreshAfterExchange(appToken: String, message: String) {
+        IlifeApi.walletOwnerWithToken(appToken) { walletResponse, _ ->
+            IlifeApi.accountScoreWithToken(appToken) { scoreResponse, _ ->
+                runOnUiThread {
+                    if (!canContinue()) return@runOnUiThread
+                    val wallets = try {
+                        walletResponse?.let(WalletResponseParser::parseWallets)
+                    } catch (_: IllegalArgumentException) {
+                        null
+                    }
+                    val score = try {
+                        scoreResponse?.let(ScoreExchangeParser::availableScore)
+                    } catch (_: IllegalArgumentException) {
+                        null
+                    }
+                    val refreshError = if (wallets == null || score == null) "；部分数据未刷新，请下拉刷新" else ""
+                    state = state.copy(
+                        wallets = wallets ?: state.wallets,
+                        availableScore = score,
+                        scoreError = if (score == null) "可用积分加载失败，请下拉刷新" else null,
+                        exchangeInProgress = false,
+                        exchangeMessage = message + refreshError
+                    )
                 }
             }
         }
@@ -284,6 +392,9 @@ class WalletActivity : ComponentActivity() {
                     onDismissRecharge = {
                         state = state.copy(showRechargeConfirmation = false)
                     },
+                    onRequestExchange = { score -> state = state.copy(exchangeScore = score) },
+                    onDismissExchange = { state = state.copy(exchangeScore = null) },
+                    onConfirmExchange = ::startExchange,
                     onConfirmRecharge = {
                         state = state.copy(showRechargeConfirmation = false)
                         startRecharge()
@@ -304,6 +415,12 @@ private data class WalletUiState(
     val selectedOwnerId: String? = null,
     val products: List<RechargeProduct> = emptyList(),
     val selectedProductId: String? = null,
+    val availableScore: Int? = null,
+    val scoreLoading: Boolean = false,
+    val scoreError: String? = null,
+    val exchangeScore: Int? = null,
+    val exchangeInProgress: Boolean = false,
+    val exchangeMessage: String = "选择档位后可调整兑换份数",
     val showRechargeConfirmation: Boolean = false,
     val statusMessage: String? = null,
     val errorMessage: String? = null
@@ -323,7 +440,10 @@ private fun WalletScreen(
     onSelectProduct: (RechargeProduct) -> Unit,
     onRequestRecharge: () -> Unit,
     onDismissRecharge: () -> Unit,
-    onConfirmRecharge: () -> Unit
+    onConfirmRecharge: () -> Unit,
+    onRequestExchange: (Int) -> Unit,
+    onDismissExchange: () -> Unit,
+    onConfirmExchange: (Int) -> Unit
 ) {
     val indicatorTopOffset = WindowInsets.statusBars.asPaddingValues().calculateTopPadding() + 72.dp
     Surface(
@@ -333,7 +453,7 @@ private fun WalletScreen(
     ) {
         WaterPullRefresh(
             isRefreshing = state.refreshing,
-            onRefresh = { if (!state.loading) onRefresh() },
+            onRefresh = { if (!state.loading && !state.exchangeInProgress) onRefresh() },
             modifier = Modifier.fillMaxSize(),
             indicatorTopOffset = indicatorTopOffset
         ) { pullOffset ->
@@ -434,9 +554,50 @@ private fun WalletScreen(
                                 wallet = wallet,
                                 selected = wallet.endpointId == state.selectedEndpointId &&
                                     wallet.ownerId == state.selectedOwnerId,
-                                enabled = !state.loading,
+                                enabled = !state.loading && !state.exchangeInProgress,
                                 onClick = { onSelectWallet(wallet) }
                             )
+                        }
+                    }
+
+                    if (state.selectedEndpointId != null) {
+                        item {
+                            PullRefreshOffsetContent(pullOffset) {
+                                Card(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    shape = RoundedCornerShape(20.dp),
+                                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+                                ) {
+                                    Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                                        Text("积分兑换", fontSize = 18.sp, fontWeight = FontWeight.SemiBold)
+                                        Text(
+                                            if (state.scoreLoading) "正在查询可用积分…"
+                                            else state.availableScore?.let { "可用积分：$it" }
+                                                ?: state.scoreError.orEmpty(),
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
+                                        state.wallets.firstOrNull {
+                                            it.endpointId == state.selectedEndpointId && it.ownerId == state.selectedOwnerId
+                                        }?.let { Text("兑换到：${it.name}") }
+                                        ScoreExchangeParser.amounts.forEach { score ->
+                                            Button(
+                                                onClick = { onRequestExchange(score) },
+                                                enabled = !state.loading && !state.exchangeInProgress && !state.scoreLoading &&
+                                                    (state.availableScore ?: 0) >= score,
+                                                modifier = Modifier.fillMaxWidth()
+                                            ) {
+                                                Text("$score 积分兑 ¥${(score / 1000.0).money()} / 份")
+                                            }
+                                        }
+                                        Text(
+                                            state.exchangeMessage,
+                                            modifier = Modifier.fillMaxWidth().heightIn(min = 64.dp),
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
+                                    }
+                                }
+                            }
                         }
                     }
 
@@ -458,7 +619,7 @@ private fun WalletScreen(
                                 ProductCard(
                                     product = product,
                                     selected = product.id == state.selectedProductId,
-                                    enabled = !state.loading,
+                                    enabled = !state.loading && !state.exchangeInProgress,
                                     onClick = { onSelectProduct(product) }
                                 )
                             }
@@ -470,7 +631,7 @@ private fun WalletScreen(
                         PullRefreshOffsetContent(pullOffset) {
                             Button(
                                 onClick = onRequestRecharge,
-                                enabled = !state.loading && selectedProduct != null,
+                                enabled = !state.loading && !state.exchangeInProgress && selectedProduct != null,
                                 modifier = Modifier.fillMaxWidth(),
                                 contentPadding = PaddingValues(vertical = 16.dp)
                             ) {
@@ -490,6 +651,61 @@ private fun WalletScreen(
                     }
                 }
             }
+        }
+    }
+
+    state.exchangeScore?.let { unitScore ->
+        val wallet = state.wallets.firstOrNull {
+            it.endpointId == state.selectedEndpointId && it.ownerId == state.selectedOwnerId
+        }
+        if (wallet != null) {
+            var quantityText by rememberSaveable(unitScore) { mutableStateOf("1") }
+            val quantity = quantityText.toIntOrNull()
+            val available = state.availableScore ?: 0
+            val maxQuantity = available / unitScore
+            val total = quantity?.let { ScoreExchangeParser.totalScore(unitScore, it, available) }
+            AlertDialog(
+                onDismissRequest = onDismissExchange,
+                title = { Text("确认积分兑换") },
+                text = {
+                    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                        Text("兑换到：${wallet.name}")
+                        Text("每份 $unitScore 积分 = ¥${(unitScore / 1000.0).money()}")
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            TextButton(
+                                onClick = { quantityText = ((quantity ?: 1) - 1).toString() },
+                                enabled = quantity != null && quantity > 1
+                            ) { Text("−") }
+                            OutlinedTextField(
+                                value = quantityText,
+                                onValueChange = { quantityText = it },
+                                modifier = Modifier.weight(1f),
+                                label = { Text("份数") },
+                                singleLine = true,
+                                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                                isError = total == null
+                            )
+                            TextButton(
+                                onClick = { quantityText = ((quantity ?: 0) + 1).toString() },
+                                enabled = quantity != null && quantity < maxQuantity
+                            ) { Text("＋") }
+                        }
+                        Text("可用积分：$available，最多 $maxQuantity 份")
+                        Text(
+                            total?.let { "合计消耗 $it 积分，兑换 ¥${(it / 1000.0).money()}" }
+                                ?: "请输入 1～$maxQuantity 之间的整数份数",
+                            fontWeight = FontWeight.SemiBold
+                        )
+                    }
+                },
+                confirmButton = {
+                    Button(
+                        onClick = { quantity?.let(onConfirmExchange) },
+                        enabled = total != null && !state.loading && !state.exchangeInProgress
+                    ) { Text("确认兑换") }
+                },
+                dismissButton = { TextButton(onClick = onDismissExchange) { Text("取消") } }
+            )
         }
     }
 

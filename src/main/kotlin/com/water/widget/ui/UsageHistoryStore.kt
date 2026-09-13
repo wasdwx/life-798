@@ -59,8 +59,17 @@ internal class UsageHistoryLedger(
             val record = records.optJSONObject(index) ?: continue
             val data = record.optJSONObject("data")
             val amount = readSpentScore(record, data)
-            if (amount <= 0 || !isConsumption(record, data)) continue
+            if (amount <= 0) continue
             val time = normalizeEpochMillis(record.optLong("ctime", 0L))
+            if (!isConsumption(record, data)) {
+                // 只撤销旧版本确实累计过的同一条流水，不清空窗口外的历史。
+                if (seen.remove(fingerprint(recordIdentity(record)))) {
+                    val day = dayKey(time)
+                    dayTotals[day] = (dayTotals[day] ?: 0) - amount
+                    changed = true
+                }
+                continue
+            }
             if (time <= localThrough) continue
             if (record(recordIdentity(record), time, amount)) changed = true
         }
@@ -126,7 +135,7 @@ internal class UsageHistoryLedger(
                 val keys = values.keys()
                 while (keys.hasNext()) {
                     val day = keys.next()
-                    values.optInt(day, 0).takeIf { it > 0 }?.let { days[day] = it }
+                    values.optInt(day, 0).takeIf { it >= 0 }?.let { days[day] = it }
                 }
             }
             return UsageHistoryLedger(seen, days, json.optLong("localThrough", 0L))
@@ -171,7 +180,7 @@ internal class UsageHistoryLedger(
 
         private fun isConsumption(record: JSONObject, data: JSONObject?): Boolean {
             val type = record.optInt("type", data?.optInt("type", Int.MIN_VALUE) ?: Int.MIN_VALUE)
-            return type == 107 || readNonZero(data, "spend") != null || readNonZero(record, "spend") != null
+            return type == 107
         }
 
         private fun readNonZero(json: JSONObject?, key: String): Int? {

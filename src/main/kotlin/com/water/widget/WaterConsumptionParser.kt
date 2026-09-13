@@ -217,9 +217,7 @@ object WaterConsumptionParser {
 
     private fun isConsumption(record: JSONObject, data: JSONObject?): Boolean {
         val type = record.optInt("type", data?.optInt("type", Int.MIN_VALUE) ?: Int.MIN_VALUE)
-        return type == 107 ||
-            readNonZero(data, "spend") != null ||
-            readNonZero(record, "spend") != null
+        return type == 107
     }
 
     private fun readNonZero(json: JSONObject?, key: String): Int? {

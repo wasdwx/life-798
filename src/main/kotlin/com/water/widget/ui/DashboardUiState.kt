@@ -48,14 +48,15 @@ object DashboardUiStateFactory {
         accountCount: Int,
         validScore: Int? = null,
         scoreJson: JSONObject? = null,
-        usageOverride: WaterUsageUiState? = null
+        usageOverride: WaterUsageUiState? = null,
+        walletBalance: Double? = null
     ): DashboardSummaryUiState {
         if (account == null) {
             return DashboardSummaryUiState(
                 accountTitle = "未登录",
                 accountSubtitle = "完成设备登录后即可使用设备",
                 scoreTitle = "--",
-                scoreSubtitle = "暂无积分",
+                scoreSubtitle = "登录后查看积分与钱包",
                 hasAccount = false,
                 hasAppToken = false,
                 hasDevices = false,
@@ -78,8 +79,13 @@ object DashboardUiStateFactory {
                 hasAppToken -> "设备登录已完成 · 可补充积分登录"
                 else -> "两项登录均未完成"
             },
-            scoreTitle = validScore?.toString() ?: "刷新中",
-            scoreSubtitle = validScore?.let { "≈${String.format(java.util.Locale.CHINA, "%.2f", it / 1000.0)}元可用" } ?: "当前账号积分",
+            scoreTitle = if (validScore != null && walletBalance != null) {
+                "≈¥" + String.format(Locale.CHINA, "%.2f", validScore / 1000.0 + walletBalance)
+            } else "--",
+            scoreSubtitle = listOf(
+                walletBalance?.let { "钱包 ¥" + String.format(Locale.CHINA, "%.2f", it) } ?: "钱包未获取",
+                validScore?.let { "积分 $it（≈" + moneyText(it) + "）" } ?: "积分未获取"
+            ).joinToString("  +  "),
             hasAccount = true,
             hasAppToken = hasAppToken,
             hasDevices = hasDevices,
@@ -140,14 +146,7 @@ object DashboardUiStateFactory {
     }
 
     private fun isConsumption(record: JSONObject, data: JSONObject?): Boolean {
-        if (record.optInt("type", data?.optInt("type", Int.MIN_VALUE) ?: Int.MIN_VALUE) == 107) return true
-        if (data?.has("spend") == true) return true
-        val textKeys = arrayOf("msg", "direction", "typeName", "scene", "bizType", "name", "title", "desc", "remark", "memo")
-        val text = buildString {
-            textKeys.forEach { key -> append(record.optString(key, "")); append(' ') }
-            if (data != null) textKeys.forEach { key -> append(data.optString(key, "")); append(' ') }
-        }.lowercase(Locale.ROOT)
-        return listOf("消费", "使用", "扣", "支出", "兑换", "water", "pay", "cost", "consume", "decrease").any(text::contains)
+        return record.optInt("type", data?.optInt("type", Int.MIN_VALUE) ?: Int.MIN_VALUE) == 107
     }
 
     private fun moneyText(score: Int): String = "¥${String.format(Locale.CHINA, "%.2f", score / 1000.0)}"

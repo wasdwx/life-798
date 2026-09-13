@@ -194,6 +194,7 @@ class WaterConsumptionParserTest {
                 JSONArray().put(
                     JSONObject()
                         .put("id", "score-water")
+                        .put("type", 107)
                         .put("ctime", 1_800_000_001_000L)
                         .put("score", 0)
                         .put("data", JSONObject().put("spend", 160))
@@ -204,6 +205,16 @@ class WaterConsumptionParserTest {
             160,
             WaterConsumptionParser.latestSince(json, 1_800_000_000_000L)?.spentScore
         )
+    }
+
+    @Test
+    fun excludesExchangeLotteryAndUnknownSpending() {
+        val records = JSONArray()
+        for (type in listOf(105, 106, 999)) {
+            records.put(JSONObject().put("type", type).put("ctime", 1_800_000_001_000L)
+                .put("msg", "用户消费积分").put("data", JSONObject().put("spend", 100)))
+        }
+        assertNull(WaterConsumptionParser.latestSince(JSONObject().put("code", 0).put("data", records), 0L))
     }
 
     @Test
