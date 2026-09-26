@@ -24,7 +24,7 @@ import java.util.Calendar
 /**
  * 积分任务的唯一执行入口。
  *
- * Activity 仅负责发送启动请求；任务批次、限速等待和网络回调全部由此前台服务持有，
+ * Activity 和小部件只发送启动/停止请求；任务批次、限速等待和网络回调全部由此前台服务持有，
  * 因此旋转屏幕、离开页面或 Activity 被回收都不会中断当前批次。
  */
 class TaskForegroundService : Service() {
@@ -80,6 +80,11 @@ class TaskForegroundService : Service() {
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         latestStartId = startId
+        if (intent?.action == ACTION_STOP_TASKS && running) {
+            // softCancel 用刚记下的 latestStartId 停服务；没在跑的停止请求落到下面直接 stopSelf
+            softCancel("任务已手动停止，可稍后重新运行。")
+            return START_NOT_STICKY
+        }
         if (intent?.action != ACTION_RUN_TASKS) {
             stopSelf(startId)
             return START_NOT_STICKY
@@ -785,6 +790,7 @@ class TaskForegroundService : Service() {
 
     companion object {
         const val ACTION_RUN_TASKS = "com.water.widget.action.RUN_TASKS"
+        const val ACTION_STOP_TASKS = "com.water.widget.action.STOP_TASKS"
         private const val ACCOUNT_GAP_MILLIS = 1_200L
         private const val MISSION_GAP_MILLIS = 30_000L
         private const val RETRY_DELAY_MILLIS = 60_000L
@@ -803,6 +809,19 @@ class TaskForegroundService : Service() {
                 StartResult.STARTED
             } catch (_: RuntimeException) {
                 StartResult.FAILED
+            }
+        }
+
+        /** 请求停止当前批次，没有批次在跑时什么也不做。 */
+        fun stop(context: Context) {
+            if (!TaskRunRepository.state.value.running) return
+            try {
+                // 批次在跑说明前台服务在，应用算前台，普通 startService 不受后台启动限制
+                context.startService(
+                    Intent(context, TaskForegroundService::class.java).setAction(ACTION_STOP_TASKS)
+                )
+            } catch (_: RuntimeException) {
+                // 真被拦下也只是没停成：批次照常跑，小部件下次刷新回到「运行中」
             }
         }
     }

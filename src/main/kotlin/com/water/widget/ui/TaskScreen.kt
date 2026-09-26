@@ -48,6 +48,7 @@ private const val MAX_VISIBLE_TASK_LOGS = 80
 fun TaskScreen(
     state: TaskUiState,
     onRun: () -> Unit,
+    onStop: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     var onlyFailures by remember { mutableStateOf(false) }
@@ -59,7 +60,7 @@ fun TaskScreen(
         }.takeLast(MAX_VISIBLE_TASK_LOGS)
     }
     val actionLabel = when {
-        state.running -> "任务执行中"
+        state.running -> "停止任务"
         state.canRun -> "运行今日任务"
         state.totalAccounts == 0 -> "请先添加账户"
         else -> "需完成积分登录"
@@ -89,7 +90,7 @@ fun TaskScreen(
                     )
                 }
                 if (state.running) LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
-                Button(onClick = onRun, enabled = state.canRun, modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(16.dp)) {
+                Button(onClick = if (state.running) onStop else onRun, enabled = state.running || state.canRun, modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(16.dp)) {
                     Text(actionLabel)
                 }
             }

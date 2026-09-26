@@ -112,11 +112,14 @@ object WidgetSupport {
         }
     }
 
-    /** 触发积分任务，返回可直接显示的中文状态。 */
-    fun runTasks(context: Context): String =
+    /** 点一下启动积分任务，运行中再点一下停止；返回可直接显示的中文状态。 */
+    fun toggleTasks(context: Context): String =
         when (TaskForegroundService.start(context)) {
             TaskForegroundService.StartResult.STARTED -> "正在启动…"
-            TaskForegroundService.StartResult.ALREADY_RUNNING -> "任务已在运行"
+            TaskForegroundService.StartResult.ALREADY_RUNNING -> {
+                TaskForegroundService.stop(context)
+                "正在停止…"
+            }
             TaskForegroundService.StartResult.NO_ACCOUNTS -> "无可用账户"
             TaskForegroundService.StartResult.FAILED -> "启动失败，请重试"
         }

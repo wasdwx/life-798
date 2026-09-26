@@ -123,6 +123,7 @@ fun DashboardScreen(
     themeMode: AppThemeMode,
     onAppearance: () -> Unit,
     onRunTasks: () -> Unit,
+    onStopTasks: () -> Unit,
     onScores: () -> Unit,
     onWallet: () -> Unit,
     onSelectAccount: (String) -> Unit,
@@ -210,7 +211,7 @@ fun DashboardScreen(
                         verticalArrangement = Arrangement.spacedBy(16.dp)
                     ) {
                         DashboardTitle(DashboardTab.TASK.title)
-                        TaskScreen(state = state.tasks, onRun = onRunTasks)
+                        TaskScreen(state = state.tasks, onRun = onRunTasks, onStop = onStopTasks)
                         Spacer(Modifier.height(8.dp))
                     }
                 }
@@ -987,6 +988,7 @@ private fun DashboardPreview() {
             themeMode = AppThemeMode.SYSTEM,
             onAppearance = {},
             onRunTasks = {},
+            onStopTasks = {},
             onScores = {},
             onWallet = {},
             onSelectAccount = {},

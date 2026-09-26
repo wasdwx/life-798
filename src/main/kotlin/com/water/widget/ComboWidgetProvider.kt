@@ -32,7 +32,7 @@ class ComboWidgetProvider : AppWidgetProvider() {
             // 服务是异步拉起的，点击瞬间还读不到运行状态，先用返回值顶上，
             // 随后服务自己广播的刷新会覆盖掉它。
             ACTION_START_DEVICE -> WidgetSupport.startDevice(context) to null
-            ACTION_RUN_TASKS -> null to WidgetSupport.runTasks(context)
+            ACTION_RUN_TASKS -> null to WidgetSupport.toggleTasks(context)
             else -> return
         }
         val manager = AppWidgetManager.getInstance(context) ?: return

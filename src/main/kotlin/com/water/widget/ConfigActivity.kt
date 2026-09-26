@@ -71,6 +71,7 @@ class ConfigActivity : ComponentActivity() {
                     themeMode = ThemeSettings.mode(this),
                     onAppearance = { startActivity(Intent(this, AppearanceActivity::class.java)) },
                     onRunTasks = { runWithNotificationPermission(::runTasksInHome) },
+                    onStopTasks = { TaskForegroundService.stop(this) },
                     onScores = { startActivity(Intent(this, ScoreActivity::class.java)) },
                     onWallet = { startActivity(Intent(this, WalletActivity::class.java)) },
                     onSelectAccount = { phone -> switchAccount(phone) },

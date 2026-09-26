@@ -7,7 +7,7 @@ import android.content.Context
 import android.content.Intent
 import android.os.Bundle
 
-/** 方块小部件：整块点击即执行积分任务。结构同 DeviceWidgetProvider。 */
+/** 方块小部件：整块点击启动积分任务，运行中再点一下停止。结构同 DeviceWidgetProvider。 */
 class TaskWidgetProvider : AppWidgetProvider() {
 
     override fun onUpdate(
@@ -26,7 +26,7 @@ class TaskWidgetProvider : AppWidgetProvider() {
         push(
             context, manager,
             manager.getAppWidgetIds(ComponentName(context, TaskWidgetProvider::class.java)),
-            WidgetSupport.runTasks(context)
+            WidgetSupport.toggleTasks(context)
         )
     }
 
