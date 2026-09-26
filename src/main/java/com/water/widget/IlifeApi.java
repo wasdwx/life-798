@@ -27,7 +27,11 @@ public class IlifeApi {
     static final String GATEWAY = BuildConfig.API_GATEWAY;
     static final String CID = BuildConfig.API_CID;
     private static final String SIGN_SALT = BuildConfig.SIGN_SALT;
-    private static final String UA = "WaterWidget/" + BuildConfig.VERSION_NAME + " (Android)";
+    private static final String UA = "Android_ilife798_3.1.9";
+    /** 服务端按此头判断客户端版本，缺失时接水会提示"请升级最新版APP"。 */
+    private static final String VERSION_CODE = "3.1.9";
+    /** 积分发送链路使用的客户端版本号，与签名盐配套（对齐 Jursin v1.3.0 的 ApiConfig.VERSION_CODE）。 */
+    private static final String SCORE_VERSION_CODE = "3.1.9";
     private static final String DEVICE_LOGIN_REJECTED_MESSAGE =
             "设备登录信息未被接受，请检查是否填反或重新完成设备登录";
 
@@ -317,7 +321,7 @@ public class IlifeApi {
                 JSONObject body = new JSONObject();
                 body.put("adId", adId);
                 body.put("type", 101);
-                String resp = httpRaw("POST", url, body.toString(), token);
+                String resp = httpRawApp("POST", url, body.toString(), token, "1,1", SCORE_VERSION_CODE);
                 cb.onResult(new JSONObject(resp), null);
             } catch (Exception e) {
                 cb.onResult(null, e.getMessage());
@@ -340,44 +344,7 @@ public class IlifeApi {
                 JSONObject body = new JSONObject();
                 body.put("weekDay", weekDay);
                 body.put("adId", signAdId);
-                String resp = httpRaw("POST", url, body.toString(), token);
-                cb.onResult(new JSONObject(resp), null);
-            } catch (Exception e) {
-                cb.onResult(null, e.getMessage());
-            }
-        }).start();
-    }
-
-    /**
-     * 完成任务（带签名）。
-     * POST /acc/score/score-send?sign=<sign>&s=true  body={adId, type:101}
-     */
-    public static void scoreSend(final Context ctx, final String adId, final JsonCallback cb) {
-        new Thread(() -> {
-            Account acc = AccountStore.getCurrent(ctx);
-            if (acc == null || !acc.hasToken()) {
-                cb.onResult(null, "未登录");
-                return;
-            }
-            // 确保 uid 存在
-            String uid = acc.uid;
-            if (uid == null || uid.isEmpty()) {
-                // 同步取 uid
-                uid = fetchUidSync(acc.token);
-                if (uid != null && !uid.isEmpty()) {
-                    acc.uid = uid;
-                    AccountStore.updateCurrent(ctx, acc);
-                }
-            }
-            final String sg = sign(adId, acc.token, uid != null ? uid : "");
-            String url = GATEWAY + "/acc/score/score-send?sign=" + sg + "&s=true";
-            JSONObject body = new JSONObject();
-            try {
-                body.put("adId", adId);
-                body.put("type", 101);
-            } catch (Exception ignored) {}
-            try {
-                String resp = httpRaw("POST", url, body.toString(), acc.token);
+                String resp = httpRawApp("POST", url, body.toString(), token, "1,1", SCORE_VERSION_CODE);
                 cb.onResult(new JSONObject(resp), null);
             } catch (Exception e) {
                 cb.onResult(null, e.getMessage());
@@ -622,6 +589,12 @@ public class IlifeApi {
     /** 同 httpRaw，但可指定 ApplicationType。 */
     private static String httpRawApp(String method, String urlStr, String body,
                                      String token, String appType) throws Exception {
+        return httpRawApp(method, urlStr, body, token, appType, VERSION_CODE);
+    }
+
+    private static String httpRawApp(String method, String urlStr, String body,
+                                     String token, String appType, String versionCode)
+            throws Exception {
         HttpURLConnection c = (HttpURLConnection) new URL(urlStr).openConnection();
         try {
             c.setRequestMethod(method);
@@ -630,6 +603,7 @@ public class IlifeApi {
             c.setRequestProperty("User-Agent", UA);
             c.setRequestProperty("Content-Type", "application/json");
             c.setRequestProperty("ApplicationType", appType);
+            c.setRequestProperty("VersionCode", versionCode);
             c.setRequestProperty("Accept-Language", "zh-Hans-CN;q=1");
             if (token != null && !token.isEmpty()) {
                 c.setRequestProperty("Authorization", token);

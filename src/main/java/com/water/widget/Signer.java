@@ -23,7 +23,8 @@ public class Signer {
         }
         try {
             long now = System.currentTimeMillis();
-            long n = 10 * (now / 10000);
+            // 服务端 2026-09 起按 30 秒时间桶校验，10 秒桶会被拒。
+            long n = 30 * (now / 30000);
             String e = token.length() >= 8 ? token.substring(token.length() - 8) : token;
             String t = uid.length() >= 8 ? uid.substring(uid.length() - 8) : uid;
             String raw = adId + n + e + t + salt;
