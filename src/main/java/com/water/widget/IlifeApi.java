@@ -255,7 +255,7 @@ public class IlifeApi {
                 ScoreExchangeParser.INSTANCE.requestBody(endpointId, score), appToken, cb);
     }
 
-    public static void exchangeBillWithToken(final String appToken, final String billId,
+    public static void billViewFullWithToken(final String appToken, final String billId,
                                              final JsonCallback cb) {
         requestApp("GET", "/bill/view-full?id=" + enc(billId), null, appToken, cb);
     }

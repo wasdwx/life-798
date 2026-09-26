@@ -267,26 +267,56 @@ public class WaterService extends Service {
                                 current.billBaseline
                         );
                         if (bill != null) {
-                            if (current.scoreToken.isEmpty() && !current.accountKey.isEmpty()) {
-                                UsageHistoryStore.INSTANCE.record(this, current.accountKey, bill);
-                            }
-                            finishConsumption(current, bill);
+                            finishBill(current, bill);
                         } else {
-                            // 账单已结算但金额判定没命中：可能是积分抵扣，也可能是启动后压根没接水。
-                            // 先记下「会话结束了」，再看积分流水有没有对应消费。
-                            boolean settled = WaterBillParser.INSTANCE.hasSettledRecordSince(
+                            // 账单已结算但列表上金额为 0：可能是积分抵扣（列表不一定带抵扣字段），
+                            // 也可能是启动后压根没接水。先拉账单详情补金额，再看积分流水。
+                            String settledId = WaterBillParser.INSTANCE.settledBillIdSince(
                                     billJson,
                                     current.monitoringStartedAt,
                                     current.did,
                                     current.billBaseline
                             );
-                            pollScoreConsumption(current, settled);
+                            if (settledId == null) {
+                                pollScoreConsumption(current, false);
+                            } else if (settledId.isEmpty()) {
+                                pollScoreConsumption(current, true);
+                            } else {
+                                pollBillDetail(current, settledId);
+                            }
                         }
                     })
             );
         } else {
             pollScoreConsumption(current, false);
         }
+    }
+
+    private void pollBillDetail(Session current, String billId) {
+        IlifeApi.billViewFullWithToken(current.billToken, billId, (json, err) ->
+                onMain(() -> {
+                    if (!isActive(current)) return;
+                    WaterConsumption bill = WaterBillParser.INSTANCE.fromViewFull(
+                            json,
+                            billId,
+                            current.monitoringStartedAt,
+                            current.did
+                    );
+                    if (bill != null) {
+                        finishBill(current, bill);
+                    } else {
+                        pollScoreConsumption(current, true);
+                    }
+                })
+        );
+    }
+
+    private void finishBill(Session current, WaterConsumption bill) {
+        // 台账按账单 id 与积分流水去重，账单合计总是要记。
+        if (!current.accountKey.isEmpty()) {
+            UsageHistoryStore.INSTANCE.record(this, current.accountKey, bill);
+        }
+        finishConsumption(current, bill);
     }
 
     private void pollScoreConsumption(Session current, boolean billSettled) {

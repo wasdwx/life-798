@@ -2,6 +2,7 @@ package com.water.widget
 
 import org.json.JSONArray
 import org.json.JSONObject
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
@@ -10,7 +11,7 @@ import org.junit.Test
 /**
  * 覆盖「会话已结束」信号与「有金额的消费」判定之间的分工。
  *
- * 真机数据：积分抵扣的接水和启动后未实际接水，账单的 payment 都是 0，
+ * 真机数据：启动后未实际接水时账单 payment 是 0，列表上的积分抵扣也可能读不到，
  * 所以 latestSince 认不出它们；hasSettledRecordSince 必须能认出来，
  * 否则监测会一路空转到十分钟超时。
  */
@@ -91,5 +92,50 @@ class WaterBillParserSettlementTest {
         assertTrue(WaterBillParser.hasSettledRecordSince(json, since))
         val consumption = WaterBillParser.latestSince(json, since)
         assertTrue(consumption != null && consumption.paymentYuan == 0.38)
+    }
+
+    @Test
+    fun pointDiscountCountsTowardTotal() {
+        val json = bill(ctime = since, utime = since + 13_000L, payment = 0.0)
+        json.getJSONArray("data").getJSONObject(0)
+            .put("promo", JSONObject().put("type", 4))
+            .put("discount", 0.16)
+
+        assertEquals(0.16, WaterBillParser.latestSince(json, since)!!.paymentYuan!!, 1e-9)
+    }
+
+    @Test
+    fun discountWithoutPointPromoIsIgnored() {
+        val json = bill(ctime = since, utime = since + 13_000L, payment = 0.0)
+        json.getJSONArray("data").getJSONObject(0)
+            .put("promo", JSONObject().put("type", 1))
+            .put("discount", 0.16)
+
+        assertNull(WaterBillParser.latestSince(json, since))
+    }
+
+    @Test
+    fun viewFullSuppliesAmountMissingFromList() {
+        val list = bill(ctime = since, utime = since + 13_000L, payment = 0.0)
+        val billId = WaterBillParser.settledBillIdSince(list, since)
+        assertEquals("bill-1", billId)
+
+        val full = list.getJSONArray("data").getJSONObject(0)
+            .put("payment", 0.1)
+            .put("promo", JSONObject().put("type", 4))
+            .put("discount", 0.06)
+        val view = JSONObject().put("code", 0).put("data", JSONObject().put("bill", full))
+
+        assertEquals(0.16, WaterBillParser.fromViewFull(view, billId!!, since)!!.paymentYuan!!, 1e-9)
+        assertNull("账单 id 对不上不能算作本次消费", WaterBillParser.fromViewFull(view, "other", since))
+    }
+
+    @Test
+    fun nonWaterCategoryIsNotSettlement() {
+        val json = bill(ctime = since, utime = since + 13_000L, payment = 0.38)
+        json.getJSONArray("data").getJSONObject(0).put("cata", 1)
+
+        assertFalse(WaterBillParser.hasSettledRecordSince(json, since))
+        assertNull(WaterBillParser.latestSince(json, since))
     }
 }

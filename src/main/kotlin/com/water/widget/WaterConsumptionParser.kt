@@ -70,14 +70,17 @@ object WaterBillParser {
                 expectedDeviceId,
                 excludedRecordKeys
             ) ?: continue
-            val payment = record.optDouble("payment", 0.0)
-            if (!payment.isFinite() || payment <= 0.0) continue
+            // 积分抵扣记在 discount 里（promo.type == 4），纯积分接水的 payment 是 0。
+            val promo = record.optJSONObject("promo")
+            val discount = if (promo?.optInt("type") == 4) record.optDouble("discount", 0.0) else 0.0
+            val total = record.optDouble("payment", 0.0) + discount
+            if (!total.isFinite() || total <= 0.0) continue
 
             if (latest == null || occurredAt > latest.occurredAt) {
                 latest = WaterConsumption(
                     spentScore = 0,
                     occurredAt = occurredAt,
-                    paymentYuan = payment,
+                    paymentYuan = total,
                     historyKey = WaterRecordFields.recordKey("bill", record, record.optJSONObject("data"))
                 )
             }
@@ -86,27 +89,51 @@ object WaterBillParser {
     }
 
     /**
+     * 解析 /bill/view-full 的单张账单。账单列表不一定带积分抵扣字段，
+     * 列表上金额为 0 的已结算账单要靠这里补出真实花费。
+     */
+    fun fromViewFull(
+        viewJson: JSONObject?,
+        billId: String,
+        sinceMillis: Long,
+        expectedDeviceId: String = ""
+    ): WaterConsumption? {
+        if (viewJson == null || viewJson.optInt("code", -999) != 0) return null
+        val bill = viewJson.optJSONObject("data")?.optJSONObject("bill") ?: return null
+        if (bill.optString("id") != billId) return null
+        val wrapped = JSONObject().put("code", 0).put("data", org.json.JSONArray().put(bill))
+        return latestSince(wrapped, sinceMillis, expectedDeviceId)
+    }
+
+    /**
      * 监测开始后是否出现了新的已结算账单。
      *
-     * 只回答「本次会话结束了没有」，不看金额：积分抵扣的接水和启动后没实际接水
-     * 这两种情况 payment 都是 0，[latestSince] 会跳过它们，
-     * 光靠那条路会一直轮询到十分钟超时。
+     * 只回答「本次会话结束了没有」，不看金额：启动后没实际接水时 payment 是 0，
+     * 列表上的积分抵扣也可能读不到，光靠 [latestSince] 会一直轮询到十分钟超时。
      */
     fun hasSettledRecordSince(
         billJson: JSONObject?,
         sinceMillis: Long,
         expectedDeviceId: String = "",
         excludedRecordKeys: Set<String> = emptySet()
-    ): Boolean {
-        if (billJson == null || billJson.optInt("code", -999) != 0) return false
-        val records = WaterRecordFields.readRecords(billJson) ?: return false
+    ): Boolean = settledBillIdSince(billJson, sinceMillis, expectedDeviceId, excludedRecordKeys) != null
+
+    /** 本次会话新结算账单的 id（账单无 id 时为空串）；没有则返回 null。 */
+    fun settledBillIdSince(
+        billJson: JSONObject?,
+        sinceMillis: Long,
+        expectedDeviceId: String = "",
+        excludedRecordKeys: Set<String> = emptySet()
+    ): String? {
+        if (billJson == null || billJson.optInt("code", -999) != 0) return null
+        val records = WaterRecordFields.readRecords(billJson) ?: return null
         for (index in 0 until records.length()) {
             val record = records.optJSONObject(index) ?: continue
             if (settledOccurredAt(record, sinceMillis, expectedDeviceId, excludedRecordKeys) != null) {
-                return true
+                return record.optString("id", "").trim()
             }
         }
-        return false
+        return null
     }
 
     /**
@@ -122,6 +149,8 @@ object WaterBillParser {
         if (record.optInt("type", Int.MIN_VALUE) != 91) return null
         // 订单 3 表示已付款；待确认、失败和取消都不能作为接水完成信号。
         if (record.optInt("status", Int.MIN_VALUE) != 3) return null
+        // cata 6 是接水消费；缺省时放行（与上游一致）。
+        if (record.has("cata") && record.optInt("cata") != 6) return null
         val data = record.optJSONObject("data")
         if (WaterRecordFields.recordKey("bill", record, data) in excludedRecordKeys) return null
         val updatedAt = WaterRecordFields.normalizeEpochMillis(record.optLong("utime", 0L))

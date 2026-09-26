@@ -248,7 +248,7 @@ class WalletActivity : ComponentActivity() {
                     refreshAfterExchange(appToken, "兑换结果待确认，请先核对官方记录，勿重复兑换")
                     return@runOnUiThread
                 }
-                IlifeApi.exchangeBillWithToken(appToken, billId) { billResponse, _ ->
+                IlifeApi.billViewFullWithToken(appToken, billId) { billResponse, _ ->
                     runOnUiThread {
                         if (!canContinue()) return@runOnUiThread
                         val completed = try {
