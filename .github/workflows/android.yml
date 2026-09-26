@@ -35,6 +35,9 @@ jobs:
 
       - name: Set up Android SDK
         uses: android-actions/setup-android@v3
+        with:
+          # 默认值含已下架的 tools 包，新版 cmdline-tools 找不到会直接失败
+          packages: platform-tools
 
       - name: Install required Android SDK packages
         run: sdkmanager "platforms;android-37.0" "build-tools;36.0.0"
@@ -99,6 +102,9 @@ jobs:
 
       - name: Set up Android SDK
         uses: android-actions/setup-android@v3
+        with:
+          # 默认值含已下架的 tools 包，新版 cmdline-tools 找不到会直接失败
+          packages: platform-tools
 
       - name: Install required Android SDK packages
         run: sdkmanager "platforms;android-37.0" "build-tools;36.0.0"
