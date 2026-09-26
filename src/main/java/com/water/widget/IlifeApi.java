@@ -504,11 +504,13 @@ public class IlifeApi {
         }).start();
     }
 
-    /** 添加或移除账户收藏设备。remove=true 表示移除。 */
-    public static void deviceFavorite(Context ctx, final String did, final boolean remove,
-                                      final TextCallback cb) {
+    /**
+     * 取消账户收藏设备。acc 由调用方在发起时冻结，
+     * 避免请求期间切换账户后拿别的账户的凭据去取消收藏。
+     */
+    public static void removeFavoriteDevice(final Account acc, final String did,
+                                            final TextCallback cb) {
         new Thread(() -> {
-            Account acc = AccountStore.getCurrent(ctx);
             if (acc == null || (!acc.hasToken() && !acc.hasAppToken())) {
                 cb.onResult(null, "未登录");
                 return;
@@ -516,12 +518,12 @@ public class IlifeApi {
             boolean useApp = acc.hasAppToken();
             String token = useApp ? acc.appToken : acc.token;
             String appType = useApp ? "1,1" : "1,5";
-            String url = GATEWAY + "/dev/favo?did=" + enc(did) + "&remove=" + (remove ? "1" : "0");
+            String url = GATEWAY + "/dev/favo?did=" + enc(did) + "&remove=true";
             try {
                 JSONObject json = new JSONObject(httpRawApp("GET", url, null, token, appType));
                 int code = json.optInt("code", -999);
                 if (code == 0) {
-                    cb.onResult(remove ? "已移除" : "已添加", null);
+                    cb.onResult("已移除", null);
                 } else if (code == -99) {
                     cb.onResult(null, "TOKEN_EXPIRED");
                 } else {

@@ -37,6 +37,10 @@ class ConfigActivity : ComponentActivity() {
     private val viewModel: DashboardViewModel by viewModels()
     private val ui = Handler(Looper.getMainLooper())
     private var scoreGeneration = 0
+    /** 设备同步代号：本地移除设备后，丢弃移除前发出的同步响应，避免把刚删的设备加回来。 */
+    private var deviceGeneration = 0
+    /** 账单补齐进行中；onResume 很频繁，避免同时跑多轮。 */
+    private var billSyncRunning = false
     private var destroyed = false
     /** 外观设置页可能改了显示模式，回到前台时对不上就重建 */
     private var appliedMode: AppThemeMode? = null
@@ -255,18 +259,20 @@ class ConfigActivity : ComponentActivity() {
     private fun removeDevice(deviceId: String) {
         val account = AccountStore.getCurrent(this)
         if (account == null || deviceId.isBlank()) return
-        IlifeApi.deviceFavorite(this, deviceId, true) { _, err ->
+        // 先本地删：设备码填错时服务器取消收藏必然失败，不能因此删不掉。
+        deviceGeneration++
+        account.forgetDevice(deviceId)
+        AccountStore.updateCurrent(this, account)
+        viewModel.reloadAccounts()
+        updateWidgets()
+        toast("设备已从本地移除")
+        IlifeApi.removeFavoriteDevice(account, deviceId) { _, err ->
             runOnUiThread {
-                if (destroyed) return@runOnUiThread
-                if (err != null && err != "TOKEN_EXPIRED") {
-                    toast("移除失败：$err")
-                    return@runOnUiThread
-                }
-                account.forgetDevice(deviceId)
-                AccountStore.updateCurrent(this, account)
-                viewModel.reloadAccounts()
-                updateWidgets()
-                toast(if (err == "TOKEN_EXPIRED") "已从本地移除；登录过期，服务器收藏可能仍保留" else "设备已移除")
+                if (destroyed || err == null) return@runOnUiThread
+                toast(
+                    if (err == "TOKEN_EXPIRED") "登录已过期，服务器收藏可能仍保留"
+                    else "服务器收藏取消失败：$err"
+                )
             }
         }
     }
@@ -300,11 +306,14 @@ class ConfigActivity : ComponentActivity() {
 
         if (showFeedback) toast("正在同步设备…")
         if (showProgress) viewModel.setDeviceSyncing(true)
+        val generation = deviceGeneration
+        val accountPhone = account.phone
         IlifeApi.master(this, object : IlifeApi.JsonCallback {
             override fun onResult(json: org.json.JSONObject?, err: String?) {
                 runOnUiThread {
                     if (destroyed) return@runOnUiThread
                     try {
+                        if (generation != deviceGeneration) return@runOnUiThread
                         if (json == null) {
                             if (showFeedback) toast("同步失败：${err ?: "未知错误"}")
                             return@runOnUiThread
@@ -336,12 +345,16 @@ class ConfigActivity : ComponentActivity() {
                                 }
                             }
                         }
-                        devices.asReversed().forEach { (id, name) -> account.rememberDevice(id, name) }
-                        if (account.selectedDeviceId().isBlank()) {
-                            devices.firstOrNull()?.first?.let(account::selectDevice)
+                        // 重新按手机号读取并只写回该账户：请求期间用户可能已切换账户，
+                        // updateCurrent 会把当前账户切回去。
+                        val target = AccountStore.get(this@ConfigActivity, accountPhone)
+                            ?: return@runOnUiThread
+                        devices.asReversed().forEach { (id, name) -> target.rememberDevice(id, name) }
+                        if (target.selectedDeviceId().isBlank()) {
+                            devices.firstOrNull()?.first?.let(target::selectDevice)
                         }
 
-                        AccountStore.updateCurrent(this@ConfigActivity, account)
+                        AccountStore.addOrUpdateKeepingCurrent(this@ConfigActivity, target)
                         if (showFeedback) toast("已同步 ${devices.size} 台设备")
                         viewModel.reloadAccounts()
                         updateWidgets()

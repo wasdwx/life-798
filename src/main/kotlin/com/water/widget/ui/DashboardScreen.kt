@@ -546,7 +546,7 @@ private fun DeviceCard(
         AlertDialog(
             onDismissRequest = { removingDevice = null },
             title = { Text("移除 ${device.name}？") },
-            text = { Text("该设备将从列表和服务器收藏中移除。") },
+            text = { Text("该设备将从本地列表移除，并尝试取消服务器收藏。") },
             confirmButton = {
                 Button(onClick = {
                     removingDevice = null
