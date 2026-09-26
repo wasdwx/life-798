@@ -119,6 +119,56 @@ class UsageHistoryLedgerTest {
         assertEquals("¥0.18", again.toUiState(now).todayCostText)
     }
 
+    @Test
+    fun `同一账单的积分流水与账单合计只按合计记一次`() {
+        val now = Calendar.getInstance()
+        val points = response(now.timeInMillis, 60, "score-1").also {
+            it.getJSONArray("data").getJSONObject(0).getJSONObject("data").put("sn", "bill-1")
+        }
+
+        // 先到积分流水（只含积分部分），后到账单合计：补差额
+        val first = UsageHistoryLedger()
+        assertTrue(first.merge(points))
+        assertTrue(first.recordLocal("bill:id:bill-1", now.timeInMillis, 160))
+        assertFalse(first.merge(points))
+        assertEquals("¥0.16", first.toUiState(now).todayCostText)
+
+        // 顺序反过来结果一样，且账单合计已入账
+        val second = UsageHistoryLedger()
+        assertTrue(second.recordLocal("bill:id:bill-1", now.timeInMillis, 160))
+        assertFalse(second.merge(points))
+        val restored = UsageHistoryLedger.fromJson(second.toJson())
+        assertEquals("¥0.16", restored.toUiState(now).todayCostText)
+        assertTrue(restored.hasBillTotal("bill:id:bill-1"))
+    }
+
+    @Test
+    fun `旧版按流水id记过的积分改挂到账单名下不重复`() {
+        val now = Calendar.getInstance()
+        val old = UsageHistoryLedger()
+        old.merge(response(now.timeInMillis, 60, "score-1"))
+
+        val withSn = response(now.timeInMillis, 60, "score-1").also {
+            it.getJSONArray("data").getJSONObject(0).getJSONObject("data").put("sn", "bill-1")
+        }
+        val upgraded = UsageHistoryLedger.fromJson(old.toJson())
+        upgraded.merge(withSn)
+        upgraded.recordLocal("bill:id:bill-1", now.timeInMillis, 160)
+
+        assertEquals("¥0.16", upgraded.toUiState(now).todayCostText)
+    }
+
+    @Test
+    fun `零元账单只登记不计费`() {
+        val now = Calendar.getInstance()
+        val ledger = UsageHistoryLedger()
+
+        assertTrue(ledger.markBillWithoutCharge("bill:id:empty"))
+        assertFalse(ledger.markBillWithoutCharge("bill:id:empty"))
+        assertTrue(UsageHistoryLedger.fromJson(ledger.toJson()).hasBillTotal("bill:id:empty"))
+        assertEquals("--", ledger.toUiState(now).todayCostText)
+    }
+
     private fun response(time: Long, spend: Int, id: String) = JSONObject()
         .put("code", 0)
         .put(

@@ -22,6 +22,8 @@ import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.repeatOnLifecycle
 import com.water.widget.ui.DashboardScreen
 import com.water.widget.ui.DashboardViewModel
+import com.water.widget.ui.UsageHistoryStore
+import com.water.widget.ui.WaterBillLogParser
 import com.water.widget.ui.WaterTheme
 import kotlinx.coroutines.launch
 
@@ -119,6 +121,7 @@ class ConfigActivity : ComponentActivity() {
         refreshCurrentScore()
         updateWidgets()
         fetchDevices(showFeedback = false)
+        syncRecentBills()
     }
 
     override fun onDestroy() {
@@ -192,6 +195,7 @@ class ConfigActivity : ComponentActivity() {
         toast("已切换到 $account")
         refreshCurrentScore()
         updateWidgets()
+        syncRecentBills()
     }
 
     private fun refreshHome() {
@@ -204,6 +208,52 @@ class ConfigActivity : ComponentActivity() {
         viewModel.setHomeRefreshing(true)
         refreshCurrentScore(onRequestComplete)
         fetchDevices(showFeedback = false, showProgress = true, onComplete = onRequestComplete)
+        syncRecentBills()
+    }
+
+    /**
+     * 把最近 20 笔接水账单补进本地台账。金额支付不产生积分流水，只能从账单里拿；
+     * 已按账单合计入账的跳过，不重复拉详情。
+     */
+    private fun syncRecentBills() {
+        if (billSyncRunning) return
+        val account = AccountStore.getCurrent(this) ?: return
+        val appToken = account.appToken?.takeIf { it.isNotBlank() } ?: return
+        val accountKey = account.phone?.takeIf { it.isNotBlank() }
+            ?: account.uid?.takeIf { it.isNotBlank() }
+            ?: return
+        billSyncRunning = true
+        IlifeApi.billListWithToken(appToken) { json, _ ->
+            val ids = runCatching { WaterBillLogParser.list(json).map { it.id } }.getOrDefault(emptyList())
+            runOnUiThread {
+                syncBillDetails(appToken, accountKey, UsageHistoryStore.missingBillIds(this, accountKey, ids), 0)
+            }
+        }
+    }
+
+    /** 逐张拉详情入账；台账写在主线程，和首页刷新读写不打架。 */
+    private fun syncBillDetails(appToken: String, accountKey: String, ids: List<String>, index: Int) {
+        if (destroyed || index >= ids.size) {
+            billSyncRunning = false
+            if (!destroyed && ids.isNotEmpty()) {
+                viewModel.reloadAccounts()
+                updateWidgets()
+            }
+            return
+        }
+        val billId = ids[index]
+        IlifeApi.billViewFullWithToken(appToken, billId) { json, _ ->
+            runOnUiThread {
+                val bill = WaterBillParser.fromViewFull(json, billId, 0L)
+                when {
+                    bill != null -> UsageHistoryStore.record(this, accountKey, bill)
+                    // 请求成功但算不出金额：0 元账单，登记后不再重拉；网络失败则下次重试。
+                    json?.optInt("code", -1) == 0 ->
+                        UsageHistoryStore.markBillWithoutCharge(this, accountKey, billId)
+                }
+                syncBillDetails(appToken, accountKey, ids, index + 1)
+            }
+        }
     }
 
     private fun refreshCurrentScore(onComplete: () -> Unit = {}) {
