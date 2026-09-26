@@ -45,13 +45,16 @@ public class WaterService extends Service {
      */
     private static final int SESSION_END_CONFIRM_ROUNDS = 1;
 
-    private static final String EXTRA_RESERVATION_ID = "extra_reservation_id";
+    static final String ACTION_STOP_MONITORING = "com.water.widget.STOP_WATER_MONITORING";
+    static final String EXTRA_RESERVATION_ID = "extra_reservation_id";
     private static final AtomicLong NEXT_RESERVATION_ID = new AtomicLong();
     private static final AtomicLong ACTIVE_RESERVATION_ID = new AtomicLong();
 
     private final Handler mainHandler = new Handler(Looper.getMainLooper());
     private Session session;
     private long ownedReservationId;
+    /** 常驻通知上显示的会话开始时刻。 */
+    private long progressStartedAt;
 
     /**
      * 当前接水会话的状态文字，无会话时为 null。
@@ -109,6 +112,10 @@ public class WaterService extends Service {
             stopSelf(startId);
             return START_NOT_STICKY;
         }
+        if (ACTION_STOP_MONITORING.equals(intent.getAction())) {
+            stopMonitoring(intent.getLongExtra(EXTRA_RESERVATION_ID, 0L), startId);
+            return START_NOT_STICKY;
+        }
         long reservationId = intent.getLongExtra(EXTRA_RESERVATION_ID, 0L);
         if (
                 reservationId <= 0L ||
@@ -131,6 +138,7 @@ public class WaterService extends Service {
         final String scoreToken = intent.getStringExtra(EXTRA_SCORE_TOKEN);
         final String accountKey = intent.getStringExtra(EXTRA_ACCOUNT_KEY);
         AppNotifications.ensureChannels(this);
+        progressStartedAt = System.currentTimeMillis();
         startAsForeground("正在准备设备…");
         publishStatus("正在准备…");
 
@@ -227,7 +235,7 @@ public class WaterService extends Service {
                     // 服务端流水通常只精确到秒；启动前基线负责排除同秒旧记录。
                     current.monitoringStartedAt =
                             System.currentTimeMillis() / 1_000L * 1_000L;
-                    notifyWaterProgress("设备已启动，等待接水完成…");
+                    notifyWaterProgress("设备已启动，接水结束后将显示本次花费");
                     publishStatus("等待接水…");
                     mainHandler.postDelayed(
                             () -> pollConsumption(current),
@@ -242,8 +250,8 @@ public class WaterService extends Service {
         if (System.currentTimeMillis() - current.monitoringStartedAt >= MAX_MONITOR_MILLIS) {
             finishWithResult(
                     current,
-                    "接水会话已结束",
-                    "暂未获取到本次消费记录，可稍后在消费统计中查看",
+                    "本次接水提醒已结束",
+                    "暂未获取到本次花费，请稍后查看消费记录",
                     false
             );
             return;
@@ -361,13 +369,13 @@ public class WaterService extends Service {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             startForeground(
                     AppNotifications.WATER_SESSION_ID,
-                    AppNotifications.waterProgress(this, text),
+                    progressNotification(text),
                     ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC
             );
         } else {
             startForeground(
                     AppNotifications.WATER_SESSION_ID,
-                    AppNotifications.waterProgress(this, text)
+                    progressNotification(text)
             );
         }
     }
@@ -378,11 +386,39 @@ public class WaterService extends Service {
         try {
             manager.notify(
                     AppNotifications.WATER_SESSION_ID,
-                    AppNotifications.waterProgress(this, text)
+                    progressNotification(text)
             );
         } catch (SecurityException ignored) {
             // 用户关闭通知时，前台服务仍可继续；最终结果会回退为 Toast。
         }
+    }
+
+    private android.app.Notification progressNotification(String text) {
+        // 比监测上限多留一个轮询周期，正常情况下总是服务先收尾。
+        return AppNotifications.waterProgress(
+                this,
+                text,
+                ownedReservationId,
+                progressStartedAt,
+                MAX_MONITOR_MILLIS + FIRST_POLL_DELAY_MILLIS + POLL_INTERVAL_MILLIS
+        );
+    }
+
+    /** 用户点了通知上的「结束提醒」：只停监测，不发结果通知。 */
+    private void stopMonitoring(long reservationId, int startId) {
+        Session current = session;
+        if (current == null) {
+            stopForeground(STOP_FOREGROUND_REMOVE);
+            stopSelf(startId);
+            return;
+        }
+        if (reservationId != current.reservationId || !isActive(current)) return;
+        session = null;
+        mainHandler.removeCallbacksAndMessages(null);
+        releaseReservation(current.reservationId);
+        stopForeground(STOP_FOREGROUND_REMOVE);
+        publishStatus(null);
+        stopSelf();
     }
 
     private void finishWithResult(
@@ -487,16 +523,20 @@ public class WaterService extends Service {
     @Override
     public void onTimeout(int startId, int fgsType) {
         Session current = session;
-        if (current != null) {
+        // 只收尾自己那次会话；不是的话直接停服务，不发结果通知。
+        if (current != null && isActive(current)) {
             finishWithResult(
                     current,
-                    "接水会话已结束",
-                    "系统已结束后台监测，可稍后在消费统计中查看",
+                    "本次接水提醒已结束",
+                    "后台运行已结束，请稍后查看消费记录",
                     false
             );
         } else {
+            session = null;
+            mainHandler.removeCallbacksAndMessages(null);
             releaseReservation(ownedReservationId);
             stopForeground(STOP_FOREGROUND_REMOVE);
+            publishStatus(null);
             stopSelf(startId);
         }
     }

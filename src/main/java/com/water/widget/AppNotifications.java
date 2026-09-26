@@ -6,7 +6,7 @@ import android.app.NotificationManager;
 import android.app.PendingIntent;
 import android.content.Context;
 import android.content.Intent;
-import android.os.Build;
+import android.net.Uri;
 
 /**
  * 应用通知渠道与通知构建入口。
@@ -76,22 +76,45 @@ public final class AppNotifications {
         return channel != null && channel.getImportance() != NotificationManager.IMPORTANCE_NONE;
     }
 
-    public static Notification waterProgress(Context context, String text) {
+    /**
+     * 接水会话常驻通知。
+     * @param startedAt       会话开始时刻，显示在通知上
+     * @param timeoutAfterMillis 兜底自动消失时间，防止进程被杀后通知残留
+     */
+    public static Notification waterProgress(
+            Context context,
+            String text,
+            long reservationId,
+            long startedAt,
+            long timeoutAfterMillis
+    ) {
         ensureChannels(context);
+        Intent stop = new Intent(context, WaterService.class)
+                .setAction(WaterService.ACTION_STOP_MONITORING)
+                // data 让不同会话的 PendingIntent 互不覆盖
+                .setData(Uri.parse("waterwidget:monitor/" + reservationId))
+                .putExtra(WaterService.EXTRA_RESERVATION_ID, reservationId);
+        PendingIntent stopIntent = PendingIntent.getService(
+                context,
+                2203,
+                stop,
+                PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE
+        );
         Notification.Builder builder = new Notification.Builder(context, CHANNEL_WATER_SESSION)
                 .setSmallIcon(R.drawable.ic_water_drop)
-                .setContentTitle("饮水设备")
+                .setContentTitle("接水提醒")
                 .setContentText(text)
                 .setContentIntent(openApp(context, false, 2201))
                 .setCategory(Notification.CATEGORY_PROGRESS)
                 .setVisibility(Notification.VISIBILITY_PRIVATE)
                 .setOnlyAlertOnce(true)
                 .setOngoing(true)
-                .setShowWhen(false)
-                .setProgress(0, 0, true);
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-            builder.setForegroundServiceBehavior(Notification.FOREGROUND_SERVICE_IMMEDIATE);
-        }
+                .setWhen(startedAt)
+                .setShowWhen(true)
+                .setProgress(0, 0, true)
+                .setTimeoutAfter(timeoutAfterMillis)
+                .addAction(new Notification.Action.Builder(null, "结束提醒", stopIntent).build())
+                .setForegroundServiceBehavior(Notification.FOREGROUND_SERVICE_IMMEDIATE);
         return builder.build();
     }
 
