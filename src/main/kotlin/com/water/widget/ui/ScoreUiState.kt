@@ -15,7 +15,10 @@ data class ScoreUiState(
     val totalMoneyText: String,
     val logs: List<ScoreLogUiState>,
     val isReady: Boolean,
-    val message: String
+    val message: String,
+    val bills: List<WaterBillLogUiState> = emptyList(),
+    val billLoading: Boolean = false,
+    val billMessage: String = ""
 )
 
 data class ScoreLogUiState(
