@@ -124,7 +124,7 @@ fun AppearanceScreen(
 }
 
 @Composable
-private fun SectionCard(title: String, subtitle: String? = null, content: @Composable ColumnScope.() -> Unit) {
+internal fun SectionCard(title: String, subtitle: String? = null, content: @Composable ColumnScope.() -> Unit) {
     Card(
         shape = RoundedCornerShape(26.dp),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),

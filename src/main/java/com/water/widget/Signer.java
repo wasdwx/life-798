@@ -5,24 +5,23 @@ import java.security.MessageDigest;
 /**
  * 签名工具类。
  *
- * 开源仓库中仅提供占位实现。本地构建时需在 secrets.properties 中配置 SIGN_SALT，
- * 构建系统会将其注入 BuildConfig，本类再通过 IlifeApi.sign() 间接使用。
- *
- * 如需完整的签名功能，请自行实现签名逻辑并配置必要的参数。
+ * 盐值由本地 secrets.properties 或 CI secrets 注入。
  */
 public class Signer {
 
     /**
      * 生成签名。
      * 当 salt 为空时返回空字符串，表示签名功能未配置。
-     * 本地开发者请参考项目文档实现签名算法。
      */
     static String sign(String adId, String token, String uid, String salt) {
+        return signAt(adId, token, uid, salt, System.currentTimeMillis());
+    }
+
+    static String signAt(String adId, String token, String uid, String salt, long now) {
         if (salt == null || salt.isEmpty()) {
             return "";
         }
         try {
-            long now = System.currentTimeMillis();
             // 服务端 2026-09 起按 30 秒时间桶校验，10 秒桶会被拒。
             long n = 30 * (now / 30000);
             String e = token.length() >= 8 ? token.substring(token.length() - 8) : token;

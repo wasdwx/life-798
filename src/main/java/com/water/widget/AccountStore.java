@@ -22,7 +22,7 @@ public class AccountStore {
 
     private static final String OLD_PREFS = "water_cfg";
 
-    public static List<Account> list(Context ctx) {
+    public static synchronized List<Account> list(Context ctx) {
         ensureMigrated(ctx);
         List<Account> out = new ArrayList<>();
         try {
@@ -34,7 +34,7 @@ public class AccountStore {
         return out;
     }
 
-    public static Account getCurrent(Context ctx) {
+    public static synchronized Account getCurrent(Context ctx) {
         ensureMigrated(ctx);
         String curPhone = sp(ctx).getString(KEY_CURRENT, "");
         for (Account a : list(ctx)) {
@@ -50,20 +50,20 @@ public class AccountStore {
     }
 
     /** 按手机号查找账户，找不到返回 null。 */
-    public static Account get(Context ctx, String phone) {
+    public static synchronized Account get(Context ctx, String phone) {
         for (Account a : list(ctx)) {
             if (a.phone.equals(phone)) return a;
         }
         return null;
     }
 
-    public static void addOrUpdate(Context ctx, Account acc) {
+    public static synchronized void addOrUpdate(Context ctx, Account acc) {
         addOrUpdateKeepingCurrent(ctx, acc);
         setCurrent(ctx, acc.phone);
     }
 
     /** 保存账户但不改变当前选中账户。用于后台补全和编辑非当前账户。 */
-    public static void addOrUpdateKeepingCurrent(Context ctx, Account acc) {
+    public static synchronized void addOrUpdateKeepingCurrent(Context ctx, Account acc) {
         List<Account> all = list(ctx);
         boolean found = false;
         for (int i = 0; i < all.size(); i++) {
@@ -81,7 +81,7 @@ public class AccountStore {
         addOrUpdate(ctx, acc);
     }
 
-    public static void remove(Context ctx, String phone) {
+    public static synchronized void remove(Context ctx, String phone) {
         List<Account> all = list(ctx);
         List<Account> out = new ArrayList<>();
         for (Account a : all) {
@@ -94,9 +94,31 @@ public class AccountStore {
         }
     }
 
-    public static void setCurrent(Context ctx, String phone) {
+    public static synchronized void setCurrent(Context ctx, String phone) {
         sp(ctx).edit().putString(KEY_CURRENT, phone).apply();
         WidgetSupport.refreshAll(ctx);
+    }
+
+    public static synchronized void updateScore(Context ctx, String phone, String expectedToken, int score) {
+        Account latest = get(ctx, phone);
+        if (latest != null && latest.updateScoreForToken(expectedToken, score)) {
+            addOrUpdateKeepingCurrent(ctx, latest);
+        }
+    }
+
+    /** Mutate metadata under the same lock as login writes; never save a stale account snapshot. */
+    public static synchronized void update(Context ctx, String phone, java.util.function.Consumer<Account> change) {
+        Account latest = get(ctx, phone);
+        if (latest == null) return;
+        change.accept(latest);
+        addOrUpdateKeepingCurrent(ctx, latest);
+    }
+
+    public static synchronized void invalidateToken(Context ctx, String phone, String expectedToken, boolean app) {
+        Account latest = get(ctx, phone);
+        if (latest != null && latest.invalidateToken(expectedToken, app)) {
+            addOrUpdateKeepingCurrent(ctx, latest);
+        }
     }
 
     /** 从旧版 water_cfg（单 token + dids）迁移为第一个账户。仅执行一次。 */

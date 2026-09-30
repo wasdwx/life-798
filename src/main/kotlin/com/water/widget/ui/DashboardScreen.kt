@@ -97,6 +97,8 @@ import androidx.compose.ui.zIndex
 import com.water.widget.AppThemeMode
 import com.water.widget.BuildConfig
 import com.water.widget.R
+import com.water.widget.WaterControlPhase
+import com.water.widget.WaterControlSession
 import kotlinx.coroutines.launch
 import top.yukonga.miuix.kmp.blur.BlendColorEntry
 import top.yukonga.miuix.kmp.blur.BlurColors
@@ -134,6 +136,8 @@ fun DashboardScreen(
     onRemoveDevice: (String) -> Unit,
     onSelectDevice: (String) -> Unit,
     onStartDevice: (String) -> Unit,
+    onStopDevice: (String) -> Unit = {},
+    onSettings: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     val colors = MaterialTheme.colorScheme
@@ -194,7 +198,9 @@ fun DashboardScreen(
                                     onEditDevice = onEditDevice,
                                     onRemoveDevice = onRemoveDevice,
                                     onSelectDevice = onSelectDevice,
-                                    onStartDevice = onStartDevice
+                                    onStartDevice = onStartDevice,
+                                    onStopDevice = onStopDevice,
+                                    waterSession = state.waterSession
                                 )
                                 Spacer(Modifier.height(8.dp))
                             }
@@ -236,6 +242,7 @@ fun DashboardScreen(
                             onWallet = onWallet,
                             themeMode = themeMode,
                             onOpenAppearanceSettings = onAppearance,
+                            onOpenSettings = onSettings,
                             onOpenSupport = { showSupportDialog = true }
                         )
                         Spacer(Modifier.height(8.dp))
@@ -281,7 +288,9 @@ private fun HomeTab(
     onEditDevice: (String, String) -> Unit,
     onRemoveDevice: (String) -> Unit,
     onSelectDevice: (String) -> Unit,
-    onStartDevice: (String) -> Unit
+    onStartDevice: (String) -> Unit,
+    onStopDevice: (String) -> Unit,
+    waterSession: WaterControlSession?
 ) {
     HeroCard(state = state, onSwitchAccount = onSwitchAccount)
     TodayOverviewCard(usage = state.usage)
@@ -293,7 +302,9 @@ private fun HomeTab(
         onEditDevice = onEditDevice,
         onRemoveDevice = onRemoveDevice,
         onSelectDevice = onSelectDevice,
-        onStartDevice = onStartDevice
+        onStartDevice = onStartDevice,
+        onStopDevice = onStopDevice,
+        waterSession = waterSession
     )
 }
 
@@ -424,7 +435,9 @@ private fun DeviceCard(
     onEditDevice: (String, String) -> Unit,
     onRemoveDevice: (String) -> Unit,
     onSelectDevice: (String) -> Unit,
-    onStartDevice: (String) -> Unit
+    onStartDevice: (String) -> Unit,
+    onStopDevice: (String) -> Unit,
+    waterSession: WaterControlSession?
 ) {
     val canStart = state.hasAccount && state.hasAppToken
     var editingDevice by remember { mutableStateOf<DeviceUiState?>(null) }
@@ -477,7 +490,9 @@ private fun DeviceCard(
                             }
                             DeviceListItem(
                                 device = device,
-                                canStart = canStart,
+                                canStart = if (waterSession?.deviceId == device.id)
+                                    waterSession.phase == WaterControlPhase.RUNNING else canStart && waterSession == null,
+                                actionLabel = waterSession?.takeIf { it.deviceId == device.id }?.phase?.label ?: "启动",
                                 modifier = Modifier
                                     .zIndex(layer)
                                     .animateBounds(
@@ -497,7 +512,10 @@ private fun DeviceCard(
                                     editingDevice = device
                                     editedName = device.name
                                 },
-                                onStart = { onStartDevice(device.id) }
+                                onStart = {
+                                    if (waterSession?.deviceId == device.id) onStopDevice(device.id)
+                                    else onStartDevice(device.id)
+                                }
                             )
                             Spacer(Modifier.height(10.dp))
                         }
@@ -562,6 +580,7 @@ private fun DeviceCard(
 private fun DeviceListItem(
     device: DeviceUiState,
     canStart: Boolean,
+    actionLabel: String,
     modifier: Modifier = Modifier,
     onSelect: () -> Unit,
     onManage: () -> Unit,
@@ -625,7 +644,7 @@ private fun DeviceListItem(
                 enabled = canStart,
                 shape = RoundedCornerShape(14.dp)
             ) {
-                Text("启动")
+                Text(actionLabel)
             }
         }
     }
@@ -658,6 +677,7 @@ private fun MineTab(
     onWallet: () -> Unit,
     themeMode: AppThemeMode,
     onOpenAppearanceSettings: () -> Unit,
+    onOpenSettings: () -> Unit,
     onOpenSupport: () -> Unit
 ) {
     PersonalUsageSummary(usage = state.usage)
@@ -683,6 +703,12 @@ private fun MineTab(
         title = "外观设置",
         subtitle = "${themeMode.label} · 小部件透明度与配色",
         onClick = onOpenAppearanceSettings
+    )
+    SettingsRow(
+        icon = Icons.Default.Settings,
+        title = "任务与更新",
+        subtitle = "每日自动任务 · 检查个人版更新",
+        onClick = onOpenSettings
     )
     SettingsRow(
         icon = Icons.Default.Favorite,

@@ -12,6 +12,9 @@ WaterWidget 是一个面向慧生活798用户的第三方 Android 设备控制�
 - 查看校园钱包余额，并通过支付宝完成充值
 - 扫描二维码或手动添加设备编号
 - 每日签到、积分任务与任务执行记录，通知栏实时显示任务进度与累计积分
+- 每日定时运行全部账号任务，支持仅设备登录的账号；提供精确闹钟与后台运行设置入口
+- 启动后可停止设备并查询结算，通知上的“结束提醒”仍只停止本地监测
+- 检查个人版仓库更新，支持自动检查频率与预发布开关，不自动安装 APK
 - 本地优先的今日 / 本月 / 本年消费与预计饮水量统计
 - 桌面小部件、设备启动快捷设置磁贴
 - 浅色、深色和跟随系统的显示模式
@@ -34,10 +37,23 @@ WaterWidget 是一个面向慧生活798用户的第三方 Android 设备控制�
 
 ```bash
 cp secrets.properties.example secrets.properties
-# 然后编辑 secrets.properties 填入实际的 API_GATEWAY / SIGN_SALT / API_CID
+# 然后编辑 secrets.properties 填入实际的 API_GATEWAY / SIGN_SALT / MINI_SIGN_SALT / API_CID
 ```
 
 > **说明**：未配置 `secrets.properties` 时项目仍可正常编译，但构建出的 APK 因缺少必要参数无法连接服务端。
+
+`SIGN_SALT` 用于 App 任务（客户端版本 `3.1.9`），`MINI_SIGN_SALT` 用于支付宝任务（`2.0.178`），不可混用。
+GitHub Actions 也需配置同名的两个 secret；缺少任何发布配置时工作流会在生成正式 APK 前失败。
+
+### 个人版发布规则
+
+Tag 必须等于 `v` 加 `app/build.gradle.kts` 中的 `versionName`。
+`v5.4.6` 这样的无后缀 tag 发布为正式版；带 `-personal.1`、`-rc.1` 等后缀的 tag 发布为预发布。
+工作流在 APK 构建、签名验证、上传成功后才解除草稿状态，重新运行时也会按 tag 修正预发布标记。
+应用检查 `wasdwx/life-798` 的已发布版本，忽略草稿及没有就绪 APK 的 release；预发布默认不提示。
+
+自动任务默认关闭。在“我的 → 任务与更新”启用并允许精确闹钟后生效；重启只重排闹钟，不直接执行任务。
+是否能准时运行仍受系统后台策略影响，可选择解除电池优化。任务不会自动启动饮水设备。
 
 ### 构建命令
 

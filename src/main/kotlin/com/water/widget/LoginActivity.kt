@@ -170,10 +170,8 @@ class LoginActivity : ComponentActivity() {
                 val data = json.optJSONObject("data")
                 val id = data?.optString("id") ?: ""
                 if (id.isNotBlank()) {
-                    val target = AccountStore.get(this, targetPhone)
-                    if (target != null) {
-                        target.uid = id
-                        AccountStore.addOrUpdateKeepingCurrent(this, target)
+                    AccountStore.update(this, targetPhone) { target ->
+                        if (target.token == token || target.appToken == token) target.uid = id
                     }
                 }
             }

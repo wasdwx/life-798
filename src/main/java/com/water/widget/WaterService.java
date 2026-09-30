@@ -46,6 +46,7 @@ public class WaterService extends Service {
     private static final int SESSION_END_CONFIRM_ROUNDS = 1;
 
     static final String ACTION_STOP_MONITORING = "com.water.widget.STOP_WATER_MONITORING";
+    static final String ACTION_STOP_DEVICE = "com.water.widget.STOP_DEVICE";
     static final String EXTRA_RESERVATION_ID = "extra_reservation_id";
     private static final AtomicLong NEXT_RESERVATION_ID = new AtomicLong();
     private static final AtomicLong ACTIVE_RESERVATION_ID = new AtomicLong();
@@ -53,6 +54,7 @@ public class WaterService extends Service {
     private final Handler mainHandler = new Handler(Looper.getMainLooper());
     private Session session;
     private long ownedReservationId;
+    private int latestStartId;
     /** 常驻通知上显示的会话开始时刻。 */
     private long progressStartedAt;
 
@@ -89,6 +91,7 @@ public class WaterService extends Service {
                 ? account.phone
                 : account.uid;
         String scoreToken = account.hasToken() ? account.token : "";
+        WaterControl.start(reservationId, accountKey == null ? "" : accountKey, did);
         Intent intent = new Intent(context, WaterService.class)
                 .putExtra(EXTRA_DID, did)
                 .putExtra(EXTRA_WIDGET_ID, widgetId)
@@ -107,6 +110,7 @@ public class WaterService extends Service {
 
     @Override
     public int onStartCommand(Intent intent, int flags, int startId) {
+        latestStartId = startId;
         if (intent == null) {
             releaseReservation(ownedReservationId);
             stopSelf(startId);
@@ -114,6 +118,11 @@ public class WaterService extends Service {
         }
         if (ACTION_STOP_MONITORING.equals(intent.getAction())) {
             stopMonitoring(intent.getLongExtra(EXTRA_RESERVATION_ID, 0L), startId);
+            return START_NOT_STICKY;
+        }
+        if (ACTION_STOP_DEVICE.equals(intent.getAction())) {
+            if (session == null) stopSelf(startId);
+            else stopDevice(intent.getLongExtra(EXTRA_RESERVATION_ID, 0L));
             return START_NOT_STICKY;
         }
         long reservationId = intent.getLongExtra(EXTRA_RESERVATION_ID, 0L);
@@ -235,6 +244,7 @@ public class WaterService extends Service {
                     // 服务端流水通常只精确到秒；启动前基线负责排除同秒旧记录。
                     current.monitoringStartedAt =
                             System.currentTimeMillis() / 1_000L * 1_000L;
+                    WaterControl.setPhase(current.reservationId, WaterControlPhase.RUNNING);
                     notifyWaterProgress("设备已启动，接水结束后将显示本次花费");
                     publishStatus("等待接水…");
                     mainHandler.postDelayed(
@@ -247,6 +257,7 @@ public class WaterService extends Service {
 
     private void pollConsumption(Session current) {
         if (!isActive(current)) return;
+        final int pollGeneration = ++current.pollGeneration;
         if (System.currentTimeMillis() - current.monitoringStartedAt >= MAX_MONITOR_MILLIS) {
             finishWithResult(
                     current,
@@ -259,7 +270,7 @@ public class WaterService extends Service {
         if (!current.billToken.isEmpty()) {
             IlifeApi.billListWithToken(current.billToken, (billJson, billErr) ->
                     onMain(() -> {
-                        if (!isActive(current)) return;
+                        if (!isPolling(current, pollGeneration)) return;
                         WaterConsumption bill = WaterBillParser.INSTANCE.latestSince(
                                 billJson,
                                 current.monitoringStartedAt,
@@ -278,40 +289,46 @@ public class WaterService extends Service {
                                     current.billBaseline
                             );
                             if (settledId == null) {
-                                pollScoreConsumption(current, false);
+                                pollScoreConsumption(current, false, pollGeneration);
                             } else if (settledId.isEmpty()) {
-                                pollScoreConsumption(current, true);
+                                pollScoreConsumption(current, true, pollGeneration);
                             } else {
-                                pollBillDetail(current, settledId);
+                                pollBillDetail(current, settledId, pollGeneration);
                             }
                         }
                     })
             );
         } else {
-            pollScoreConsumption(current, false);
+            pollScoreConsumption(current, false, pollGeneration);
         }
     }
 
-    private void pollBillDetail(Session current, String billId) {
+    private void pollBillDetail(Session current, String billId, int pollGeneration) {
         IlifeApi.billViewFullWithToken(current.billToken, billId, (json, err) ->
                 onMain(() -> {
-                    if (!isActive(current)) return;
+                    if (!isPolling(current, pollGeneration)) return;
                     WaterConsumption bill = WaterBillParser.INSTANCE.fromViewFull(
                             json,
                             billId,
                             current.monitoringStartedAt,
-                            current.did
+                            current.did,
+                            true
                     );
                     if (bill != null) {
                         finishBill(current, bill);
                     } else {
-                        pollScoreConsumption(current, true);
+                        // A failed/malformed detail response does not prove a zero-cost session.
+                        pollScoreConsumption(current, false, pollGeneration);
                     }
                 })
         );
     }
 
     private void finishBill(Session current, WaterConsumption bill) {
+        if (bill.getScoreEquivalent() == 0) {
+            finishWithResult(current, "设备使用已结束", "本次未产生费用", false);
+            return;
+        }
         // 台账按账单 id 与积分流水去重，账单合计总是要记。
         if (!current.accountKey.isEmpty()) {
             UsageHistoryStore.INSTANCE.record(this, current.accountKey, bill);
@@ -319,15 +336,15 @@ public class WaterService extends Service {
         finishConsumption(current, bill);
     }
 
-    private void pollScoreConsumption(Session current, boolean billSettled) {
-        if (!isActive(current)) return;
+    private void pollScoreConsumption(Session current, boolean billSettled, int pollGeneration) {
+        if (!isPolling(current, pollGeneration)) return;
         if (current.scoreToken.isEmpty()) {
             settleOrRetry(current, billSettled);
             return;
         }
         IlifeApi.scoreLstWithToken(current.scoreToken, (json, err) ->
                 onMain(() -> {
-                    if (!isActive(current)) return;
+                    if (!isPolling(current, pollGeneration)) return;
                     WaterConsumption consumption =
                             WaterConsumptionParser.INSTANCE.latestSince(
                                     json,
@@ -379,9 +396,11 @@ public class WaterService extends Service {
 
     private void scheduleNextPoll(Session current) {
         if (!isActive(current)) return;
+        long interval = current.fastPolls > 0 ? 2_000L : POLL_INTERVAL_MILLIS;
+        if (current.fastPolls > 0) current.fastPolls--;
         mainHandler.postDelayed(
                 () -> pollConsumption(current),
-                POLL_INTERVAL_MILLIS
+                interval
         );
     }
 
@@ -430,8 +449,45 @@ public class WaterService extends Service {
                 text,
                 ownedReservationId,
                 progressStartedAt,
-                MAX_MONITOR_MILLIS + FIRST_POLL_DELAY_MILLIS + POLL_INTERVAL_MILLIS
+                MAX_MONITOR_MILLIS + FIRST_POLL_DELAY_MILLIS + POLL_INTERVAL_MILLIS,
+                session != null && session.monitoringStartedAt > 0 && !session.stopRequested && !session.deviceStopped
         );
+    }
+
+    public static boolean stop(Context context, String did) {
+        WaterControlSession control = WaterControl.current();
+        Account account = AccountStore.getCurrent(context);
+        if (control == null || account == null) return false;
+        String key = account.phone == null || account.phone.isEmpty() ? account.uid : account.phone;
+        if (!control.canStop(key, did)) return false;
+        try {
+            context.startService(new Intent(context, WaterService.class).setAction(ACTION_STOP_DEVICE)
+                    .putExtra(EXTRA_RESERVATION_ID, control.getReservationId()));
+            return true;
+        } catch (RuntimeException error) {
+            return false;
+        }
+    }
+
+    private void stopDevice(long reservationId) {
+        Session current = session;
+        if (current == null || !isActive(current) || reservationId != current.reservationId
+                || current.monitoringStartedAt == 0 || current.stopRequested || current.deviceStopped) return;
+        current.stopRequested = true;
+        current.pollGeneration++;
+        mainHandler.removeCallbacksAndMessages(null);
+        WaterControl.setPhase(reservationId, WaterControlPhase.STOPPING);
+        notifyWaterProgress("正在停止设备…");
+        IlifeApi.devEndWithToken(current.billToken, current.did, (result, error) -> onMain(() -> {
+            if (!isActive(current)) return;
+            current.stopRequested = false;
+            current.deviceStopped = error == null;
+            WaterControl.setPhase(reservationId, error == null ? WaterControlPhase.SETTLING : WaterControlPhase.RUNNING);
+            if (error != null) Toast.makeText(this, "停止结果未确认：" + error + "，请检查设备", Toast.LENGTH_LONG).show();
+            notifyWaterProgress(error == null ? "设备已停止，正在查询本次消费" : "停止未确认，继续监测消费");
+            current.fastPolls = 5;
+            pollConsumption(current);
+        }));
     }
 
     /** 用户点了通知上的「结束提醒」：只停监测，不发结果通知。 */
@@ -465,7 +521,7 @@ public class WaterService extends Service {
         showResult(title, text, recovery);
         // 会话结束，清空实时状态并通知小部件（widget_info 里 updatePeriodMillis=0，系统不会自己刷）
         publishStatus(null);
-        stopSelf(current.startId);
+        stopSelf(latestStartId);
     }
 
     private void finishImmediate(
@@ -522,9 +578,14 @@ public class WaterService extends Service {
                 ACTIVE_RESERVATION_ID.get() == expected.reservationId;
     }
 
+    private boolean isPolling(Session expected, int generation) {
+        return isActive(expected) && expected.pollGeneration == generation && !expected.stopRequested;
+    }
+
     private static void releaseReservation(long reservationId) {
         if (reservationId > 0L) {
             ACTIVE_RESERVATION_ID.compareAndSet(reservationId, 0L);
+            WaterControl.clear(reservationId);
         }
     }
 
@@ -609,6 +670,10 @@ public class WaterService extends Service {
         int pendingBaselines;
         boolean baselineFrozen;
         long monitoringStartedAt;
+        int pollGeneration;
+        int fastPolls;
+        boolean stopRequested;
+        boolean deviceStopped;
         /** 连续几轮「账单已结算但查不到消费」，达到阈值即判定为未实际接水。 */
         int settledRounds;
 

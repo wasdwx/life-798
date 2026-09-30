@@ -6,6 +6,8 @@ import androidx.lifecycle.viewModelScope
 import com.water.widget.Account
 import com.water.widget.AccountStore
 import com.water.widget.TaskRunRepository
+import com.water.widget.WaterControl
+import com.water.widget.WaterControlSession
 import kotlinx.coroutines.flow.MutableStateFlow
 import org.json.JSONObject
 import kotlinx.coroutines.flow.StateFlow
@@ -18,7 +20,8 @@ data class DashboardUiState(
     val accounts: List<DashboardAccountUiState> = emptyList(),
     val tasks: TaskUiState = TaskUiStateFactory.from(emptyList(), false, 0, emptyList()),
     val homeRefreshing: Boolean = false,
-    val deviceSyncing: Boolean = false
+    val deviceSyncing: Boolean = false,
+    val waterSession: WaterControlSession? = null
 )
 
 class DashboardViewModel(application: Application) : AndroidViewModel(application) {
@@ -38,6 +41,7 @@ class DashboardViewModel(application: Application) : AndroidViewModel(applicatio
                 publish()
             }
         }
+        viewModelScope.launch { WaterControl.state.collect { publish() } }
     }
 
     fun reloadAccounts(resetScore: Boolean = false) {
@@ -106,7 +110,10 @@ class DashboardViewModel(application: Application) : AndroidViewModel(applicatio
                     taskRun.logs
                 ),
                 homeRefreshing = homeRefreshing,
-                deviceSyncing = deviceSyncing
+                deviceSyncing = deviceSyncing,
+                waterSession = WaterControl.state.value?.takeIf {
+                    it.accountKey == (current?.phone?.takeIf(String::isNotBlank) ?: current?.uid)
+                }
             )
         }
     }

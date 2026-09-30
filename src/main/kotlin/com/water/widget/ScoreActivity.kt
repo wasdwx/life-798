@@ -46,15 +46,19 @@ class ScoreActivity : ComponentActivity() {
             return
         }
 
-        IlifeApi.missionLstWithToken(token) { missionJson, missionErr ->
+        val platform = TaskProtocol.preferredPlatform(account)
+        IlifeApi.missionLstWithToken(token, platform) { missionJson, missionErr ->
             IlifeApi.scoreLstWithToken(token) { scoreJson, scoreErr ->
                 runOnUiThread {
+                    if (generation != refreshGeneration || isDestroyed) return@runOnUiThread
                     val error = missionErr ?: scoreErr
                     val state = ScoreUiStateFactory.from(account, missionJson, scoreJson, error)
-                    if (state.validScore > 0 && state.validScore != account.score) {
+                    if (state.isReady && state.validScore >= 0 && state.validScore != account.score) {
                         // 顺手缓存，供桌面小部件离线展示（AccountStore 落盘时会通知小部件刷新）
-                        account.score = state.validScore
-                        AccountStore.addOrUpdateKeepingCurrent(this, account)
+                        AccountStore.updateScore(this, account.phone, token, state.validScore)
+                    }
+                    if (missionJson?.optInt("code", -999) == -99) {
+                        AccountStore.invalidateToken(this, account.phone, token, platform == TaskPlatform.APP)
                     }
                     updateScore(generation, index, state)
                 }
@@ -148,5 +152,10 @@ class ScoreActivity : ComponentActivity() {
                 )
             }
         }
+    }
+
+    override fun onDestroy() {
+        refreshGeneration++
+        super.onDestroy()
     }
 }

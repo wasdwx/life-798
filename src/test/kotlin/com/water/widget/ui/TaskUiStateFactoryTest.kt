@@ -37,13 +37,13 @@ class TaskUiStateFactoryTest {
     }
 
     @Test
-    fun `只有设备登录时提示补充积分登录`() {
+    fun `只有设备登录时也能执行App任务`() {
         val account = Account("账号A").apply { appToken = "app-token" }
 
         val state = TaskUiStateFactory.from(listOf(account), false, 0, emptyList())
 
-        assertFalse(state.canRun)
-        assertEquals("请完成积分登录", state.summary)
+        assertTrue(state.canRun)
+        assertEquals(1, state.runnableAccounts)
     }
 
     @Test

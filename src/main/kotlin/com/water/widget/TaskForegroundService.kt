@@ -10,6 +10,7 @@ import android.os.Build
 import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
+import android.os.PowerManager
 import android.os.SystemClock
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -39,6 +40,9 @@ class TaskForegroundService : Service() {
     private var hadFailures = false
     private var lastWidgetRefreshAt = 0L
     private var latestStartId = 0
+    private val expiredTokens = mutableSetOf<String>()
+    private var wakeLock: PowerManager.WakeLock? = null
+    private val batchTimeout = Runnable { softCancel("任务已运行一小时，已停止以避免持续耗电，可稍后继续。") }
 
     override fun onCreate() {
         super.onCreate()
@@ -96,7 +100,7 @@ class TaskForegroundService : Service() {
             return START_NOT_STICKY
         }
 
-        val accounts = AccountStore.list(this).filter { it.hasToken() }
+        val accounts = AccountStore.list(this).filter { it.hasToken() || it.hasAppToken() }
         if (accounts.isEmpty()) {
             startForegroundCompat(buildNotification(TaskRunState(running = true)))
             stopForeground(STOP_FOREGROUND_REMOVE)
@@ -128,6 +132,7 @@ class TaskForegroundService : Service() {
         taskRateLimiter.clear()
         completedLanes = 0
         hadFailures = false
+        expiredTokens.clear()
         running = true
         stoppingNormally = false
         val runGeneration = ++generation
@@ -139,6 +144,12 @@ class TaskForegroundService : Service() {
                 "共享账号标识、uid 或 Token 的账号将串行执行。"
         )
         startForegroundCompat(buildNotification(TaskRunRepository.state.value))
+        wakeLock = (getSystemService(POWER_SERVICE) as PowerManager)
+            .newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "water:points-task").apply {
+                setReferenceCounted(false)
+                acquire(MAX_BATCH_MILLIS)
+            }
+        mainHandler.postDelayed(batchTimeout, MAX_BATCH_MILLIS)
 
         plannedLanes.forEachIndexed { laneIndex, lane ->
             runAccountLane(
@@ -168,6 +179,7 @@ class TaskForegroundService : Service() {
     }
 
     override fun onDestroy() {
+        releaseWakeLock()
         notificationScope.cancel()
         mainHandler.removeCallbacks(stallWatchdog)
         if (running && !stoppingNormally) {
@@ -231,7 +243,9 @@ class TaskForegroundService : Service() {
                 // 起始余额已在 loadAndRunAccountTasks 里缓存，这里补上本次新增；
                 // 不补的话小部件显示的余额永远停在跑之前那个数。
                 account.score += gained
-                AccountStore.addOrUpdateKeepingCurrent(this@TaskForegroundService, account)
+                val token = listOf(account.token.orEmpty(), account.appToken.orEmpty())
+                    .firstOrNull { it.isNotBlank() && it !in expiredTokens }.orEmpty()
+                AccountStore.updateScore(this@TaskForegroundService, account.phone, token, account.score)
             }
             if (index + 1 >= accounts.size) {
                 // 最后一个账号后面没有请求要限速，空等 ACCOUNT_GAP 只会让通知多停在「收尾」
@@ -253,17 +267,24 @@ class TaskForegroundService : Service() {
         account: Account,
         laneId: Int,
         runGeneration: Int,
+        platform: TaskPlatform = TaskProtocol.preferredPlatform(account),
         done: (Int) -> Unit
     ) {
-        IlifeApi.missionLstWithToken(account.token) { missionJson, missionErr ->
+        val token = TaskProtocol.token(account, platform)
+        IlifeApi.missionLstWithToken(token, platform) { missionJson, missionErr ->
             onMain {
                 if (!isActive(runGeneration)) return@onMain
                 if (missionJson == null || missionJson.optInt("code", -999) != 0) {
                     hadFailures = true
+                    recordTokenFailure(account, platform, token, missionJson)
                     appendTaskLog(
-                        "  [$account] 获取任务列表失败: " +
-                            (missionErr ?: missionJson?.optString("msg", "未知错误"))
+                        "  [$account][$platform] 获取任务列表失败: " + TaskProtocol.failure(missionJson, missionErr, token)
                     )
+                    if (platform == TaskPlatform.MAIN && account.hasAppToken() && missionJson?.optInt("code") == -99) {
+                        appendTaskLog("  主平台登录失效，改为执行有效的 App 平台任务")
+                        loadAndRunAccountTasks(account, laneId, runGeneration, TaskPlatform.APP, done)
+                        return@onMain
+                    }
                     TaskRunRepository.updateLane(
                         laneId = laneId,
                         currentTask = "任务列表获取失败",
@@ -275,38 +296,39 @@ class TaskForegroundService : Service() {
 
                 val data = missionJson.optJSONObject("data")
                 val missions = data?.optJSONArray("missions")
-                val score = data?.optJSONObject("accScoreRsp")?.optInt("validScore", 0) ?: 0
+                val score = data?.optJSONObject("accScoreRsp")?.optInt("validScore", -1) ?: -1
                 appendTaskLog("  当前积分: $score，任务数: ${missions?.length() ?: 0}")
-                if (score > 0) {
+                if (score >= 0) {
                     // 缓存下来供桌面小部件离线展示，小部件不能自己发网络请求
                     account.score = score
-                    AccountStore.addOrUpdateKeepingCurrent(this@TaskForegroundService, account)
+                    AccountStore.updateScore(this@TaskForegroundService, account.phone, token, score)
                 }
                 TaskRunRepository.updateLane(
                     laneId = laneId,
                     currentTask = "检查每日签到",
                     phase = TaskLanePhase.SIGNING_IN
                 )
-                runDailySignInIfNeeded(account, data, laneId, runGeneration) { signGained ->
+                runDailySignInIfNeeded(account, platform, data, laneId, runGeneration) { signGained ->
                     TaskRunRepository.updateLane(
                         laneId = laneId,
                         currentTask = "正在合并任务列表",
                         phase = TaskLanePhase.LOADING_MISSIONS
                     )
-                    loadAppMissionsIfNeeded(account, missions, laneId, runGeneration) { plannedMissions ->
+                    loadAppMissionsIfNeeded(account, platform, missions, laneId, runGeneration) { plannedMissions ->
                         TaskRunRepository.updateLane(
                             laneId = laneId,
                             currentTask = "核对今日任务进度",
                             phase = TaskLanePhase.LOADING_MISSIONS
                         )
-                        IlifeApi.scoreLstWithToken(account.token) { scoreJson, scoreErr ->
+                        IlifeApi.scoreLstWithToken(token) { scoreJson, scoreErr ->
                             onMain {
                                 if (!isActive(runGeneration)) return@onMain
                                 if (scoreJson == null || scoreJson.optInt("code", -999) != 0) {
                                     hadFailures = true
+                                    recordTokenFailure(account, platform, token, scoreJson)
                                     appendTaskLog(
                                         "  [$account] 获取今日任务进度失败: " +
-                                            (scoreErr ?: scoreJson?.optString("msg", "未知错误"))
+                                            TaskProtocol.failure(scoreJson, scoreErr, token)
                                     )
                                 }
                                 val doneCount = parseTodayDoneCount(scoreJson)
@@ -341,6 +363,7 @@ class TaskForegroundService : Service() {
 
     private fun runDailySignInIfNeeded(
         account: Account,
+        platform: TaskPlatform,
         data: JSONObject?,
         laneId: Int,
         runGeneration: Int,
@@ -385,13 +408,14 @@ class TaskForegroundService : Service() {
             }
             else -> {
                 appendTaskLog("  [$account] 每日签到: 未签到，优先执行")
-                sendDailySignIn(account, plan, laneId, runGeneration, retry = false, done = done)
+                sendDailySignIn(account, platform, plan, laneId, runGeneration, retry = false, done = done)
             }
         }
     }
 
     private fun sendDailySignIn(
         account: Account,
+        platform: TaskPlatform,
         plan: DailySignInPlan,
         laneId: Int,
         runGeneration: Int,
@@ -399,8 +423,7 @@ class TaskForegroundService : Service() {
         done: (Int) -> Unit
     ) {
         if (!isActive(runGeneration)) return
-        val token = account.token.takeIf { it.isNotBlank() }
-            ?: account.appToken.takeIf { it.isNotBlank() }
+        val token = TaskProtocol.token(account, platform)
         if (token.isNullOrBlank()) {
             hadFailures = true
             appendTaskLog("    [$account] 签到失败: 无可用 Token，继续任务")
@@ -415,7 +438,11 @@ class TaskForegroundService : Service() {
         )
         val delay = taskRateLimiter.reserveDelayMillis(token, System.currentTimeMillis())
         postDelayed(delay, runGeneration) {
-            IlifeApi.scoreSendSignIn(token, account.uid, plan.weekDay, plan.adId) { json, err ->
+            if (!canUseToken(account, platform, token)) {
+                done(0)
+                return@postDelayed
+            }
+            IlifeApi.scoreSendSignIn(token, account.uid, plan.weekDay, plan.adId, plan.baseScore, platform) { json, err ->
                 onMain {
                     if (!isActive(runGeneration)) return@onMain
                     when {
@@ -444,6 +471,7 @@ class TaskForegroundService : Service() {
                             postDelayed(RETRY_DELAY_MILLIS, runGeneration) {
                                 sendDailySignIn(
                                     account,
+                                    platform,
                                     plan,
                                     laneId,
                                     runGeneration,
@@ -454,8 +482,8 @@ class TaskForegroundService : Service() {
                         }
                         else -> {
                             hadFailures = true
-                            val code = json?.optInt("code", -999)
-                            val reason = err ?: json?.optString("msg", "code=$code") ?: "未知错误"
+                            recordTokenFailure(account, platform, token, json)
+                            val reason = TaskProtocol.failure(json, err, token)
                             appendTaskLog("    [$account] 签到失败: $reason，继续任务")
                             done(0)
                         }
@@ -467,17 +495,22 @@ class TaskForegroundService : Service() {
 
     private fun loadAppMissionsIfNeeded(
         account: Account,
+        initialPlatform: TaskPlatform,
         mainMissions: JSONArray?,
         laneId: Int,
         runGeneration: Int,
         callback: (List<PlannedMission>) -> Unit
     ) {
         if (!isActive(runGeneration)) return
+        if (initialPlatform == TaskPlatform.APP) {
+            callback(TaskMissionPlanner.merge(null, mainMissions))
+            return
+        }
         if (!account.hasAppToken()) {
             callback(TaskMissionPlanner.merge(mainMissions, null))
             return
         }
-        IlifeApi.missionLstWithToken(account.appToken) { appJson, _ ->
+        IlifeApi.missionLstWithToken(account.appToken, TaskPlatform.APP) { appJson, error ->
             onMain {
                 if (!isActive(runGeneration)) return@onMain
                 var appMissions: JSONArray? = null
@@ -486,7 +519,8 @@ class TaskForegroundService : Service() {
                     appendTaskLog("  官方 App 任务数: ${appMissions?.length() ?: 0}，已合并去重")
                 } else {
                     hadFailures = true
-                    appendTaskLog("  [$account] 官方 App 任务获取失败，继续执行支付宝任务")
+                    recordTokenFailure(account, TaskPlatform.APP, account.appToken, appJson)
+                    appendTaskLog("  [$account] 官方 App 任务获取失败：${TaskProtocol.failure(appJson, error, account.appToken)}，继续执行支付宝任务")
                     TaskRunRepository.updateLane(
                         laneId = laneId,
                         currentTask = "App 任务获取失败，继续运行",
@@ -523,6 +557,10 @@ class TaskForegroundService : Service() {
         } else {
             account.token
         }
+        if (!canUseToken(account, item.platform, token)) {
+            runMissionItems(account, work, index + 1, gained, laneId, runGeneration, done = done)
+            return
+        }
         TaskRunRepository.updateLane(
             laneId = laneId,
             currentTask = "$platformName ${item.name}$notificationRound",
@@ -531,7 +569,11 @@ class TaskForegroundService : Service() {
         appendTaskLog("  [${index + 1}/${work.size}] $platformName ${item.name} +${item.score}分$round")
         val delay = taskRateLimiter.reserveDelayMillis(token, System.currentTimeMillis())
         postDelayed(delay, runGeneration) {
-            IlifeApi.scoreSendWithToken(token, account.uid, item.refId) { json, err ->
+            if (!canUseToken(account, item.platform, token)) {
+                runMissionItems(account, work, index + 1, gained, laneId, runGeneration, done = done)
+                return@postDelayed
+            }
+            IlifeApi.scoreSendWithToken(token, account.uid, item.refId, item.score, item.platform) { json, err ->
                 onMain {
                     if (!isActive(runGeneration)) return@onMain
                     val nextGained = when {
@@ -589,9 +631,10 @@ class TaskForegroundService : Service() {
                         }
                         else -> {
                             hadFailures = true
+                            recordTokenFailure(account, item.platform, token, json)
                             appendTaskLog(
                                 "    [$account] $platformName ${item.name}$round：" +
-                                    "失败 code=${json.optInt("code", -999)} ${json.optString("msg", "")}"
+                                    "失败 ${TaskProtocol.failure(json, err, token)}"
                             )
                             gained
                         }
@@ -626,6 +669,7 @@ class TaskForegroundService : Service() {
 
     private fun finishRun() {
         if (!running) return
+        releaseWakeLock()
         val gained = TaskRunRepository.state.value.totalGained
         appendTaskLog(
             if (hadFailures) {
@@ -648,6 +692,7 @@ class TaskForegroundService : Service() {
 
     private fun softCancel(message: String) {
         if (!running) return
+        releaseWakeLock()
         generation += 1
         running = false
         stoppingNormally = true
@@ -659,6 +704,28 @@ class TaskForegroundService : Service() {
         WidgetSupport.refreshAll(this)
         stopForeground(STOP_FOREGROUND_REMOVE)
         stopSelf(latestStartId)
+    }
+
+    private fun releaseWakeLock() {
+        mainHandler.removeCallbacks(batchTimeout)
+        wakeLock?.let { if (it.isHeld) it.release() }
+        wakeLock = null
+    }
+
+    private fun recordTokenFailure(account: Account, platform: TaskPlatform, token: String, json: JSONObject?) {
+        if (json?.optInt("code", -999) != -99) return
+        expiredTokens += token
+        AccountStore.invalidateToken(this, account.phone, token, platform == TaskPlatform.APP)
+    }
+
+    private fun canUseToken(account: Account, platform: TaskPlatform, token: String): Boolean {
+        if (token in expiredTokens) return false
+        val latest = AccountStore.get(this, account.phone)
+        if (latest != null && TaskProtocol.token(latest, platform) == token) return true
+        expiredTokens += token
+        hadFailures = true
+        appendTaskLog("  [$account][$platform] 登录信息已变更，停止使用旧凭据，请重新运行任务")
+        return false
     }
 
     private fun isActive(runGeneration: Int): Boolean =
@@ -796,11 +863,12 @@ class TaskForegroundService : Service() {
         private const val RETRY_DELAY_MILLIS = 60_000L
         private const val MAX_RATE_LIMIT_RETRIES = 3
         private const val STALL_TIMEOUT_MILLIS = 4 * 60_000L
+        private const val MAX_BATCH_MILLIS = 60 * 60_000L
         private const val WIDGET_REFRESH_INTERVAL_MILLIS = 3_000L
 
         fun start(context: Context): StartResult {
             if (TaskRunRepository.state.value.running) return StartResult.ALREADY_RUNNING
-            if (AccountStore.list(context).none { it.hasToken() }) return StartResult.NO_ACCOUNTS
+            if (AccountStore.list(context).none { it.hasToken() || it.hasAppToken() }) return StartResult.NO_ACCOUNTS
             return try {
                 androidx.core.content.ContextCompat.startForegroundService(
                     context,

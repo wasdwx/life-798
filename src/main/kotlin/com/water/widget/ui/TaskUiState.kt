@@ -16,7 +16,7 @@ data class TaskUiState(
 
 object TaskUiStateFactory {
     fun from(accounts: List<Account>, running: Boolean, totalGained: Int, logs: List<String>): TaskUiState {
-        val runnable = accounts.count { it.hasToken() }
+        val runnable = accounts.count { it.hasToken() || it.hasAppToken() }
         val dual = accounts.count { it.hasToken() && it.hasAppToken() }
         return TaskUiState(
             totalAccounts = accounts.size,
@@ -27,7 +27,7 @@ object TaskUiStateFactory {
             canRun = !running && runnable > 0,
             summary = when {
                 accounts.isEmpty() -> "请先添加账户"
-                runnable == 0 -> "请完成积分登录"
+                runnable == 0 -> "请完成设备或积分登录"
                 else -> "$runnable 个账号可运行"
             },
             logs = logs,

@@ -53,11 +53,13 @@ object WaterBillParser {
         }
     }
 
+    @JvmOverloads
     fun latestSince(
         billJson: JSONObject?,
         sinceMillis: Long,
         expectedDeviceId: String = "",
-        excludedRecordKeys: Set<String> = emptySet()
+        excludedRecordKeys: Set<String> = emptySet(),
+        includeZero: Boolean = false
     ): WaterConsumption? {
         if (billJson == null || billJson.optInt("code", -999) != 0) return null
         val records = WaterRecordFields.readRecords(billJson) ?: return null
@@ -72,9 +74,10 @@ object WaterBillParser {
             ) ?: continue
             // 积分抵扣记在 discount 里（promo.type == 4），纯积分接水的 payment 是 0。
             val promo = record.optJSONObject("promo")
-            val discount = if (promo?.optInt("type") == 4) record.optDouble("discount", 0.0) else 0.0
-            val total = record.optDouble("payment", 0.0) + discount
-            if (!total.isFinite() || total <= 0.0) continue
+            val discount = if (promo?.optInt("type") == 4) record.optDouble("discount", Double.NaN) else 0.0
+            val payment = record.optDouble("payment", Double.NaN)
+            val total = payment + discount
+            if (!total.isFinite() || payment < 0 || discount < 0 || total < 0 || (!includeZero && total == 0.0)) continue
 
             if (latest == null || occurredAt > latest.occurredAt) {
                 latest = WaterConsumption(
@@ -92,17 +95,19 @@ object WaterBillParser {
      * 解析 /bill/view-full 的单张账单。账单列表不一定带积分抵扣字段，
      * 列表上金额为 0 的已结算账单要靠这里补出真实花费。
      */
+    @JvmOverloads
     fun fromViewFull(
         viewJson: JSONObject?,
         billId: String,
         sinceMillis: Long,
-        expectedDeviceId: String = ""
+        expectedDeviceId: String = "",
+        includeZero: Boolean = false
     ): WaterConsumption? {
         if (viewJson == null || viewJson.optInt("code", -999) != 0) return null
         val bill = viewJson.optJSONObject("data")?.optJSONObject("bill") ?: return null
         if (bill.optString("id") != billId) return null
         val wrapped = JSONObject().put("code", 0).put("data", org.json.JSONArray().put(bill))
-        return latestSince(wrapped, sinceMillis, expectedDeviceId)
+        return latestSince(wrapped, sinceMillis, expectedDeviceId, includeZero = includeZero)
     }
 
     /**

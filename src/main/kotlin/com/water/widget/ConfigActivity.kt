@@ -4,6 +4,7 @@ import android.Manifest
 import android.appwidget.AppWidgetManager
 import android.content.ComponentName
 import android.content.Intent
+import android.net.Uri
 import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
@@ -15,6 +16,12 @@ import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -26,6 +33,7 @@ import com.water.widget.ui.UsageHistoryStore
 import com.water.widget.ui.WaterBillLogParser
 import com.water.widget.ui.WaterTheme
 import kotlinx.coroutines.launch
+import org.json.JSONObject
 
 /**
  * Compose 版主页入口。
@@ -37,6 +45,7 @@ class ConfigActivity : ComponentActivity() {
     }
 
     private val viewModel: DashboardViewModel by viewModels()
+    private val updates: AppUpdateViewModel by viewModels()
     private val ui = Handler(Looper.getMainLooper())
     private var scoreGeneration = 0
     /** 设备同步代号：本地移除设备后，丢弃移除前发出的同步响应，避免把刚删的设备加回来。 */
@@ -76,6 +85,7 @@ class ConfigActivity : ComponentActivity() {
                     onAccounts = { startActivity(Intent(this, AccountsActivity::class.java)) },
                     themeMode = ThemeSettings.mode(this),
                     onAppearance = { startActivity(Intent(this, AppearanceActivity::class.java)) },
+                    onSettings = { startActivity(Intent(this, AppSettingsActivity::class.java)) },
                     onRunTasks = { runWithNotificationPermission(::runTasksInHome) },
                     onStopTasks = { TaskForegroundService.stop(this) },
                     onScores = { startActivity(Intent(this, ScoreActivity::class.java)) },
@@ -89,11 +99,39 @@ class ConfigActivity : ComponentActivity() {
                     onSelectDevice = { deviceId -> selectControlCenterDevice(deviceId) },
                     onStartDevice = { deviceId ->
                         runWithNotificationPermission { startDevice(deviceId) }
+                    },
+                    onStopDevice = { deviceId ->
+                        if (!WaterService.stop(this, deviceId)) toast("当前设备不在可停止的会话中")
                     }
                 )
+                val update by updates.state.collectAsStateWithLifecycle()
+                var dismissedTag by rememberSaveable { mutableStateOf<String?>(null) }
+                update.available?.takeIf { it.tag != dismissedTag }?.let { release ->
+                    AlertDialog(onDismissRequest = { dismissedTag = release.tag },
+                        title = { Text("发现个人版更新 ${release.tag}") },
+                        text = { Text(release.notes.take(1500).ifBlank { "查看 GitHub 发布说明后自行选择安装。" }) },
+                        confirmButton = {
+                            TextButton(onClick = {
+                                dismissedTag = release.tag
+                                try { startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(release.url))) }
+                                catch (_: RuntimeException) { toast("没有可打开网页的应用") }
+                            }) { Text("查看发布页") }
+                        },
+                        dismissButton = { TextButton(onClick = { dismissedTag = release.tag }) { Text("稍后") } })
+                }
             }
         }
         observeTaskCompletion()
+        lifecycleScope.launch {
+            var previous: WaterControlSession? = null
+            WaterControl.state.collect { current ->
+                if (previous != null && current == null) {
+                    refreshCurrentScore()
+                    syncRecentBills()
+                }
+                previous = current
+            }
+        }
         consumeRecoveryIntent(intent)
     }
 
@@ -122,6 +160,8 @@ class ConfigActivity : ComponentActivity() {
         updateWidgets()
         fetchDevices(showFeedback = false)
         syncRecentBills()
+        AutoTasks.schedule(this)
+        updates.check()
     }
 
     override fun onDestroy() {
@@ -140,7 +180,7 @@ class ConfigActivity : ComponentActivity() {
                 true
             }
             TaskForegroundService.StartResult.NO_ACCOUNTS -> {
-                toast("没有可运行账号，请先完成积分登录")
+                toast("没有可运行账号，请先完成设备或积分登录")
                 false
             }
             TaskForegroundService.StartResult.FAILED -> {
@@ -244,11 +284,11 @@ class ConfigActivity : ComponentActivity() {
         val billId = ids[index]
         IlifeApi.billViewFullWithToken(appToken, billId) { json, _ ->
             runOnUiThread {
-                val bill = WaterBillParser.fromViewFull(json, billId, 0L)
+                val bill = WaterBillParser.fromViewFull(json, billId, 0L, includeZero = true)
                 when {
-                    bill != null -> UsageHistoryStore.record(this, accountKey, bill)
-                    // 请求成功但算不出金额：0 元账单，登记后不再重拉；网络失败则下次重试。
-                    json?.optInt("code", -1) == 0 ->
+                    bill != null && bill.scoreEquivalent > 0 -> UsageHistoryStore.record(this, accountKey, bill)
+                    // Only an explicitly parsed zero bill is final; malformed details can be retried.
+                    bill != null ->
                         UsageHistoryStore.markBillWithoutCharge(this, accountKey, billId)
                 }
                 syncBillDetails(appToken, accountKey, ids, index + 1)
@@ -266,31 +306,36 @@ class ConfigActivity : ComponentActivity() {
             onComplete()
             return
         }
-        IlifeApi.missionLstWithToken(token) { missionJson, _ ->
-            IlifeApi.scoreLstWithToken(token) { scoreJson, _ ->
-                val walletToken = account.appToken?.takeIf { it.isNotBlank() } ?: token
-                IlifeApi.walletOwnerWithToken(walletToken) { walletJson, _ ->
-                    val balance = try {
-                        walletJson?.let { WalletResponseParser.dashboardBalance(it, account.eid) }
-                    } catch (_: IllegalArgumentException) {
-                        null
-                    }
-                    runOnUiThread {
-                        if (destroyed) return@runOnUiThread
-                        if (
-                            generation == scoreGeneration &&
-                            AccountStore.getCurrent(this)?.phone == accountPhone
-                        ) {
-                            val score = missionJson?.optJSONObject("data")
-                                ?.optJSONObject("accScoreRsp")
-                                ?.optInt("validScore")
-                            viewModel.setCurrentScoreData(score, scoreJson, balance)
-                        }
-                        onComplete()
-                    }
+        val platform = TaskProtocol.preferredPlatform(account)
+        var pending = 3
+        var score: Int? = null
+        var logs: JSONObject? = null
+        var balance: Double? = null
+        fun complete() {
+            if (--pending != 0 || destroyed) return
+            if (generation == scoreGeneration && AccountStore.getCurrent(this)?.phone == accountPhone) {
+                viewModel.setCurrentScoreData(score, logs, balance)
+            }
+            onComplete()
+        }
+        IlifeApi.missionLstWithToken(token, platform) { json, _ -> runOnUiThread {
+            if (json?.optInt("code", -999) == 0) {
+                score = json.optJSONObject("data")?.optJSONObject("accScoreRsp")?.optInt("validScore")
+            } else if (json?.optInt("code", -999) == -99) {
+                AccountStore.invalidateToken(this, account.phone, token, platform == TaskPlatform.APP)
+                if (!destroyed && generation == scoreGeneration) {
+                    viewModel.reloadAccounts()
+                    toast("${if (platform == TaskPlatform.APP) "设备" else "积分"}登录已过期，请重新登录")
                 }
             }
-        }
+            complete()
+        } }
+        IlifeApi.scoreLstWithToken(token) { json, _ -> runOnUiThread { logs = json; complete() } }
+        val walletToken = account.appToken?.takeIf { it.isNotBlank() } ?: token
+        IlifeApi.walletOwnerWithToken(walletToken) { json, _ -> runOnUiThread {
+            balance = runCatching { json?.let { WalletResponseParser.dashboardBalance(it, account.eid) } }.getOrNull()
+            complete()
+        } }
     }
 
     private fun openAddDevice() {
@@ -397,14 +442,12 @@ class ConfigActivity : ComponentActivity() {
                         }
                         // 重新按手机号读取并只写回该账户：请求期间用户可能已切换账户，
                         // updateCurrent 会把当前账户切回去。
-                        val target = AccountStore.get(this@ConfigActivity, accountPhone)
-                            ?: return@runOnUiThread
-                        devices.asReversed().forEach { (id, name) -> target.rememberDevice(id, name) }
-                        if (target.selectedDeviceId().isBlank()) {
-                            devices.firstOrNull()?.first?.let(target::selectDevice)
+                        AccountStore.update(this@ConfigActivity, accountPhone) { target ->
+                            devices.asReversed().forEach { (id, name) -> target.rememberDevice(id, name) }
+                            if (target.selectedDeviceId().isBlank()) {
+                                devices.firstOrNull()?.first?.let(target::selectDevice)
+                            }
                         }
-
-                        AccountStore.addOrUpdateKeepingCurrent(this@ConfigActivity, target)
                         if (showFeedback) toast("已同步 ${devices.size} 台设备")
                         viewModel.reloadAccounts()
                         updateWidgets()

@@ -138,4 +138,18 @@ class WaterBillParserSettlementTest {
         assertFalse(WaterBillParser.hasSettledRecordSince(json, since))
         assertNull(WaterBillParser.latestSince(json, since))
     }
+
+    @Test
+    fun zeroDetailMustBeExplicitAndMalformedDetailsAreNotFreeWater() {
+        val record = bill(since, since + 1_000, 0.0).getJSONArray("data").getJSONObject(0)
+        val view = JSONObject().put("code", 0).put("data", JSONObject().put("bill", record))
+        assertNull(WaterBillParser.fromViewFull(view, "bill-1", since))
+        assertEquals(0.0, WaterBillParser.fromViewFull(view, "bill-1", since, includeZero = true)!!.paymentYuan!!, 0.0)
+        record.remove("payment")
+        assertNull(WaterBillParser.fromViewFull(view, "bill-1", since, includeZero = true))
+        record.put("payment", 0).put("promo", JSONObject().put("type", 4))
+        assertNull(WaterBillParser.fromViewFull(view, "bill-1", since, includeZero = true))
+        record.put("discount", 0.16)
+        assertEquals(0.16, WaterBillParser.fromViewFull(view, "bill-1", since, includeZero = true)!!.paymentYuan!!, 1e-9)
+    }
 }

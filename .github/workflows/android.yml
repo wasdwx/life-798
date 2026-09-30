@@ -51,14 +51,19 @@ jobs:
         env:
           API_GATEWAY: ${{ secrets.API_GATEWAY }}
           SIGN_SALT: ${{ secrets.SIGN_SALT }}
+          MINI_SIGN_SALT: ${{ secrets.MINI_SIGN_SALT }}
           API_CID: ${{ secrets.API_CID }}
         run: |
           printf 'API_GATEWAY=%s\n' "$API_GATEWAY" > secrets.properties
           printf 'SIGN_SALT=%s\n' "$SIGN_SALT" >> secrets.properties
+          printf 'MINI_SIGN_SALT=%s\n' "$MINI_SIGN_SALT" >> secrets.properties
           printf 'API_CID=%s\n' "$API_CID" >> secrets.properties
 
       - name: Run unit tests
         run: ./gradlew testDebugUnitTest --no-daemon --stacktrace --info
+
+      - name: Test release state transitions (offline)
+        run: python3 scripts/test_release_publish.py
 
       - name: Run Android lint
         run: ./gradlew lintDebug --no-daemon --stacktrace
@@ -89,6 +94,9 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
+    concurrency:
+      group: android-publish-${{ github.repository }}
+      cancel-in-progress: false
 
     steps:
       - name: Checkout
@@ -125,6 +133,7 @@ jobs:
         env:
           API_GATEWAY: ${{ secrets.API_GATEWAY }}
           SIGN_SALT: ${{ secrets.SIGN_SALT }}
+          MINI_SIGN_SALT: ${{ secrets.MINI_SIGN_SALT }}
           API_CID: ${{ secrets.API_CID }}
           ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
           ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
@@ -132,7 +141,7 @@ jobs:
           ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
           EXPECTED_RELEASE_CERT_SHA256: ${{ vars.EXPECTED_RELEASE_CERT_SHA256 }}
         run: |
-          for name in API_GATEWAY SIGN_SALT API_CID ANDROID_KEYSTORE_BASE64 ANDROID_KEYSTORE_PASSWORD ANDROID_KEY_ALIAS ANDROID_KEY_PASSWORD; do
+          for name in API_GATEWAY SIGN_SALT MINI_SIGN_SALT API_CID ANDROID_KEYSTORE_BASE64 ANDROID_KEYSTORE_PASSWORD ANDROID_KEY_ALIAS ANDROID_KEY_PASSWORD; do
             if [[ -z "${!name}" ]]; then
               echo "::error::Missing required Actions secret: $name"
               exit 1
@@ -149,10 +158,12 @@ jobs:
         env:
           API_GATEWAY: ${{ secrets.API_GATEWAY }}
           SIGN_SALT: ${{ secrets.SIGN_SALT }}
+          MINI_SIGN_SALT: ${{ secrets.MINI_SIGN_SALT }}
           API_CID: ${{ secrets.API_CID }}
         run: |
           printf 'API_GATEWAY=%s\n' "$API_GATEWAY" > secrets.properties
           printf 'SIGN_SALT=%s\n' "$SIGN_SALT" >> secrets.properties
+          printf 'MINI_SIGN_SALT=%s\n' "$MINI_SIGN_SALT" >> secrets.properties
           printf 'API_CID=%s\n' "$API_CID" >> secrets.properties
 
       - name: Run unit tests
@@ -211,15 +222,22 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           asset="$RUNNER_TEMP/release-assets/WaterWidget-${GITHUB_REF_NAME}-release.apk"
-          release_flags=()
+          prerelease=false
+          latest=true
           if [[ "$GITHUB_REF_NAME" == *-* ]]; then
-            release_flags=(--prerelease --latest=false)
+            prerelease=true
+            latest=false
+          else
+            published_tags="$(gh release list --exclude-drafts --exclude-pre-releases --limit 100 --json tagName --jq '.[].tagName')"
+            highest_tag="$(printf '%s\n' "$GITHUB_REF_NAME" "$published_tags" | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | sort -V | tail -n 1)"
+            if [[ "$highest_tag" != "$GITHUB_REF_NAME" ]]; then
+              latest=false
+            fi
           fi
           if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
             gh release upload "$GITHUB_REF_NAME" "$asset" --clobber
-            if (( ${#release_flags[@]} > 0 )); then
-              gh release edit "$GITHUB_REF_NAME" "${release_flags[@]}"
-            fi
           else
-            gh release create "$GITHUB_REF_NAME" "$asset" --verify-tag --generate-notes "${release_flags[@]}"
+            gh release create "$GITHUB_REF_NAME" "$asset" --verify-tag --target "$GITHUB_SHA" --title "$GITHUB_REF_NAME" --generate-notes --draft
           fi
+          # Existing drafts/prereleases must also be normalized on a successful rerun.
+          gh release edit "$GITHUB_REF_NAME" --draft=false --prerelease="$prerelease" --latest="$latest"

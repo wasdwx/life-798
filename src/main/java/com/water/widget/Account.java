@@ -92,6 +92,21 @@ public class Account {
         return appToken != null && !appToken.isEmpty();
     }
 
+    /** Apply background metadata only while its credential still belongs to this account. */
+    public boolean updateScoreForToken(String expectedToken, int value) {
+        if (expectedToken == null || expectedToken.isEmpty() || value < 0) return false;
+        if (!expectedToken.equals(token) && !expectedToken.equals(appToken)) return false;
+        score = value;
+        return true;
+    }
+
+    public boolean invalidateToken(String expectedToken, boolean app) {
+        if (expectedToken == null || expectedToken.isEmpty()) return false;
+        if (!expectedToken.equals(app ? appToken : token)) return false;
+        if (app) appToken = ""; else token = "";
+        return true;
+    }
+
     /** 是否已选择出水设备。 */
     public boolean hasDevices() {
         return notEmpty(selectedDeviceId());

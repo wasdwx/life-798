@@ -30,8 +30,7 @@ public class IlifeApi {
     private static final String UA = "Android_ilife798_3.1.9";
     /** 服务端按此头判断客户端版本，缺失时接水会提示"请升级最新版APP"。 */
     private static final String VERSION_CODE = "3.1.9";
-    /** 积分发送链路使用的客户端版本号，与签名盐配套（对齐 Jursin v1.3.0 的 ApiConfig.VERSION_CODE）。 */
-    private static final String SCORE_VERSION_CODE = "3.1.9";
+    private static volatile long appClockOffsetMillis;
     private static final String DEVICE_LOGIN_REJECTED_MESSAGE =
             "设备登录信息未被接受，请检查是否填反或重新完成设备登录";
 
@@ -155,9 +154,14 @@ public class IlifeApi {
 
     /** 用指定 token 获取任务列表（用于双平台合并）。 */
     public static void missionLstWithToken(final String token, final JsonCallback cb) {
+        missionLstWithToken(token, TaskPlatform.MAIN, cb);
+    }
+
+    public static void missionLstWithToken(final String token, final TaskPlatform platform, final JsonCallback cb) {
         new Thread(() -> {
             try {
-                String body = httpRaw("GET", GATEWAY + "/acc/score/mission-lst", null, token);
+                String body = httpRawApp("GET", GATEWAY + "/acc/score/mission-lst", null, token,
+                        TaskProtocol.appType(platform), TaskProtocol.version(platform));
                 cb.onResult(new JSONObject(body), null);
             } catch (Exception e) {
                 cb.onResult(null, e.getMessage());
@@ -309,19 +313,16 @@ public class IlifeApi {
 
     /** 用指定 token 执行积分任务（用于双平台合并）。 */
     public static void scoreSendWithToken(final String token, final String uid,
-                                          final String adId, final JsonCallback cb) {
+                                          final String adId, final int score,
+                                          final TaskPlatform platform, final JsonCallback cb) {
         new Thread(() -> {
             try {
                 String effectiveUid = uid;
                 if (effectiveUid == null || effectiveUid.isEmpty()) {
                     effectiveUid = fetchUidSync(token);
                 }
-                final String sg = sign(adId, token, effectiveUid != null ? effectiveUid : "");
-                String url = GATEWAY + "/acc/score/score-send?sign=" + sg + "&s=true";
-                JSONObject body = new JSONObject();
-                body.put("adId", adId);
-                body.put("type", 101);
-                String resp = httpRawApp("POST", url, body.toString(), token, "1,1", SCORE_VERSION_CODE);
+                String resp = sendScore(token, effectiveUid, adId,
+                        TaskProtocol.missionBody(adId, score, platform), platform);
                 cb.onResult(new JSONObject(resp), null);
             } catch (Exception e) {
                 cb.onResult(null, e.getMessage());
@@ -332,6 +333,7 @@ public class IlifeApi {
     /** 每日签到。weekDay: 1=周一...7=周日, signAdId: 签到adId(通常为"DAILY_CHECK_IN")。 */
     public static void scoreSendSignIn(final String token, final String uid,
                                        final int weekDay, final String signAdId,
+                                       final int baseScore, final TaskPlatform platform,
                                        final JsonCallback cb) {
         new Thread(() -> {
             try {
@@ -339,17 +341,26 @@ public class IlifeApi {
                 if (effectiveUid == null || effectiveUid.isEmpty()) {
                     effectiveUid = fetchUidSync(token);
                 }
-                final String sg = sign(signAdId, token, effectiveUid != null ? effectiveUid : "");
-                String url = GATEWAY + "/acc/score/score-send?sign=" + sg + "&s=true";
-                JSONObject body = new JSONObject();
-                body.put("weekDay", weekDay);
-                body.put("adId", signAdId);
-                String resp = httpRawApp("POST", url, body.toString(), token, "1,1", SCORE_VERSION_CODE);
+                String resp = sendScore(token, effectiveUid, signAdId,
+                        TaskProtocol.signInBody(signAdId, weekDay, baseScore, platform), platform);
                 cb.onResult(new JSONObject(resp), null);
             } catch (Exception e) {
                 cb.onResult(null, e.getMessage());
             }
         }).start();
+    }
+
+    private static String sendScore(String token, String uid, String adId, JSONObject body,
+                                    TaskPlatform platform) throws Exception {
+        boolean app = platform == TaskPlatform.APP;
+        String salt = app ? SIGN_SALT : BuildConfig.MINI_SIGN_SALT;
+        if (salt.isEmpty()) throw new IllegalStateException(app ? "未配置 SIGN_SALT" : "未配置 MINI_SIGN_SALT");
+        if (uid == null || uid.isEmpty()) throw new IllegalStateException("无法获取账户 UID，请重新登录");
+        String signature = Signer.signAt(adId, token, uid, salt,
+                System.currentTimeMillis() + (app ? appClockOffsetMillis : 0));
+        if (signature.isEmpty()) throw new IllegalStateException("任务签名生成失败");
+        return httpRawApp("POST", GATEWAY + "/acc/score/score-send?sign=" + signature + (app ? "&s=1" : ""),
+                body.toString(), token, TaskProtocol.appType(platform), TaskProtocol.version(platform));
     }
 
     /** 同步获取 uid（从 view-info）。 */
@@ -368,11 +379,11 @@ public class IlifeApi {
     // ====== 设备 ======
 
     public static void master(Context ctx, final JsonCallback cb) {
+        Account acc = AccountStore.getCurrent(ctx);
+        boolean useApp = acc != null && acc.hasAppToken();
+        String token = acc == null ? "" : (useApp ? acc.appToken : acc.token);
+        String appType = useApp ? "1,1" : "1,5";
         new Thread(() -> {
-            Account acc = AccountStore.getCurrent(ctx);
-            boolean useApp = acc != null && acc.hasAppToken();
-            String token = acc == null ? "" : (useApp ? acc.appToken : acc.token);
-            String appType = useApp ? "1,1" : "1,5";
             try {
                 String body = httpRawApp("GET", GATEWAY + "/ui/app/master", null, token, appType);
                 cb.onResult(new JSONObject(body), null);
@@ -538,6 +549,15 @@ public class IlifeApi {
 
     // ====== 通用请求 ======
 
+    /** Only the service's frozen session token may stop that device. Never retry a control request. */
+    public static void devEndWithToken(final String appToken, final String did, final TextCallback cb) {
+        requestApp("GET", "/dev/end?did=" + enc(did) + "&rcp=false", null, appToken, (json, err) -> {
+            if (json == null) cb.onResult(null, err);
+            else if (json.optInt("code", -999) == 0) cb.onResult("设备已停止", null);
+            else cb.onResult(null, TaskProtocol.INSTANCE.failure(json, err, appToken));
+        });
+    }
+
     private static void get(Context ctx, final String path, final JsonCallback cb) {
         new Thread(() -> {
             Account acc = AccountStore.getCurrent(ctx);
@@ -602,7 +622,8 @@ public class IlifeApi {
             c.setRequestMethod(method);
             c.setConnectTimeout(15000);
             c.setReadTimeout(15000);
-            c.setRequestProperty("User-Agent", UA);
+            c.setRequestProperty("User-Agent", "1,5".equals(appType) && "2.0.178".equals(versionCode)
+                    ? "WaterWidget/" + BuildConfig.VERSION_NAME + " (Android)" : UA);
             c.setRequestProperty("Content-Type", "application/json");
             c.setRequestProperty("ApplicationType", appType);
             c.setRequestProperty("VersionCode", versionCode);
@@ -618,13 +639,26 @@ public class IlifeApi {
                 os.close();
             }
             int http = c.getResponseCode();
+            if ("1,1".equals(appType) && "3.1.9".equals(versionCode) && c.getDate() > 0) {
+                long offset = c.getDate() - System.currentTimeMillis();
+                // Reject implausible intermediaries' dates instead of poisoning every subsequent signature.
+                if (Math.abs(offset) <= 24 * 60 * 60_000L) appClockOffsetMillis = offset;
+            }
+            if (http == 401) return new JSONObject().put("code", -99).put("msg", "登录已过期（HTTP 401）").toString();
+            InputStream stream = http >= 400 ? c.getErrorStream() : c.getInputStream();
+            if (stream == null) throw new java.io.IOException("HTTP " + http + "，响应为空");
             BufferedReader rd = new BufferedReader(new InputStreamReader(
-                    http >= 400 ? c.getErrorStream() : c.getInputStream(), "UTF-8"));
+                    stream, "UTF-8"));
             StringBuilder sb = new StringBuilder();
             String line;
             while ((line = rd.readLine()) != null) sb.append(line);
             rd.close();
-            return sb.toString();
+            String response = sb.toString();
+            if (http >= 400) {
+                try { new JSONObject(response); }
+                catch (JSONException ex) { throw new java.io.IOException("HTTP " + http + "，服务端响应异常"); }
+            }
+            return response;
         } finally {
             c.disconnect();
         }

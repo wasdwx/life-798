@@ -32,11 +32,14 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -54,7 +57,9 @@ fun ScoreDashboardScreen(
 ) {
     val totalAvailableScore = states.filter { it.isReady }.sumOf { it.validScore }
     val readyAccountCount = states.count { it.isReady }
-    val indicatorTopOffset = WindowInsets.statusBars.asPaddingValues().calculateTopPadding() + 80.dp
+    var headerHeight by remember { mutableIntStateOf(0) }
+    val indicatorTopOffset = WindowInsets.statusBars.asPaddingValues().calculateTopPadding() +
+        16.dp + with(LocalDensity.current) { headerHeight.toDp() }
 
     Box(modifier = modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
         WaterPullRefresh(
@@ -77,7 +82,7 @@ fun ScoreDashboardScreen(
                 verticalArrangement = Arrangement.spacedBy(16.dp)
             ) {
                 item {
-                    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Column(Modifier.onSizeChanged { headerHeight = it.height }, verticalArrangement = Arrangement.spacedBy(4.dp)) {
                         Text(
                             "积分与消费记录",
                             fontSize = 26.sp,

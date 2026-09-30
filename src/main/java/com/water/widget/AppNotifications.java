@@ -86,7 +86,8 @@ public final class AppNotifications {
             String text,
             long reservationId,
             long startedAt,
-            long timeoutAfterMillis
+            long timeoutAfterMillis,
+            boolean canStopDevice
     ) {
         ensureChannels(context);
         Intent stop = new Intent(context, WaterService.class)
@@ -115,6 +116,15 @@ public final class AppNotifications {
                 .setTimeoutAfter(timeoutAfterMillis)
                 .addAction(new Notification.Action.Builder(null, "结束提醒", stopIntent).build())
                 .setForegroundServiceBehavior(Notification.FOREGROUND_SERVICE_IMMEDIATE);
+        if (canStopDevice) {
+            Intent endDevice = new Intent(context, WaterService.class)
+                    .setAction(WaterService.ACTION_STOP_DEVICE)
+                    .setData(Uri.parse("waterwidget:device/" + reservationId))
+                    .putExtra(WaterService.EXTRA_RESERVATION_ID, reservationId);
+            PendingIntent endIntent = PendingIntent.getService(context, 2204, endDevice,
+                    PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
+            builder.addAction(new Notification.Action.Builder(null, "停止设备", endIntent).build());
+        }
         return builder.build();
     }
 
