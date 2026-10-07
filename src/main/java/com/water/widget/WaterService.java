@@ -10,6 +10,8 @@ import android.os.Build;
 import android.os.Handler;
 import android.os.IBinder;
 import android.os.Looper;
+import android.os.PowerManager;
+import android.os.SystemClock;
 import android.widget.RemoteViews;
 import android.widget.Toast;
 
@@ -35,6 +37,8 @@ public class WaterService extends Service {
     private static final long BASELINE_TIMEOUT_MILLIS = 4_000L;
     private static final long FIRST_POLL_DELAY_MILLIS = 8_000L;
     private static final long POLL_INTERVAL_MILLIS = 10_000L;
+    private static final long FAST_POLL_INTERVAL_MILLIS = 2_000L;
+    private static final long FAST_POLL_WINDOW_MILLIS = 60_000L;
     private static final long MAX_MONITOR_MILLIS = 10 * 60_000L;
     /**
      * 连续几轮「账单已结算但查不到消费」才判定为未实际接水。
@@ -55,6 +59,7 @@ public class WaterService extends Service {
     private Session session;
     private long ownedReservationId;
     private int latestStartId;
+    private PowerManager.WakeLock wakeLock;
     /** 常驻通知上显示的会话开始时刻。 */
     private long progressStartedAt;
 
@@ -176,6 +181,12 @@ public class WaterService extends Service {
                 accountKey == null ? "" : accountKey
         );
         session = started;
+        PowerManager power = getSystemService(PowerManager.class);
+        if (power != null) {
+            wakeLock = power.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "water:device-session");
+            wakeLock.setReferenceCounted(false);
+            wakeLock.acquire(MAX_MONITOR_MILLIS + BASELINE_TIMEOUT_MILLIS + 60_000L);
+        }
         captureBaselines(started);
         return START_NOT_STICKY;
     }
@@ -185,15 +196,6 @@ public class WaterService extends Service {
      * 也不会被误认为本次接水；网络较慢时最多等待四秒，不长期阻塞设备使用。
      */
     private void captureBaselines(Session current) {
-        current.pendingBaselines = 0;
-        if (!current.billToken.isEmpty()) current.pendingBaselines++;
-        if (!current.scoreToken.isEmpty()) current.pendingBaselines++;
-
-        if (current.pendingBaselines == 0) {
-            beginDeviceStart(current);
-            return;
-        }
-
         mainHandler.postDelayed(
                 () -> beginDeviceStart(current),
                 BASELINE_TIMEOUT_MILLIS
@@ -204,7 +206,7 @@ public class WaterService extends Service {
                     onMain(() -> {
                         if (!isActive(current) || current.baselineFrozen) return;
                         current.billBaseline = WaterBillParser.INSTANCE.recordKeys(json);
-                        baselineFinished(current);
+                        beginDeviceStart(current);
                     })
             );
         }
@@ -213,15 +215,13 @@ public class WaterService extends Service {
                     onMain(() -> {
                         if (!isActive(current) || current.baselineFrozen) return;
                         current.scoreBaseline = WaterConsumptionParser.INSTANCE.recordKeys(json);
-                        baselineFinished(current);
+                        current.scoreBaselineCaptured = json != null && json.optInt("code", -999) == 0;
                     })
             );
         }
-    }
-
-    private void baselineFinished(Session current) {
-        current.pendingBaselines = Math.max(0, current.pendingBaselines - 1);
-        if (current.pendingBaselines == 0) beginDeviceStart(current);
+        // The score endpoint is auxiliary: a slow request must not hold up device control.
+        // Freeze both snapshots at start so a late response cannot exclude this session's usage.
+        if (current.billToken.isEmpty()) beginDeviceStart(current);
     }
 
     private void beginDeviceStart(Session current) {
@@ -244,6 +244,7 @@ public class WaterService extends Service {
                     // 服务端流水通常只精确到秒；启动前基线负责排除同秒旧记录。
                     current.monitoringStartedAt =
                             System.currentTimeMillis() / 1_000L * 1_000L;
+                    current.monitoringStartedElapsed = SystemClock.elapsedRealtime();
                     WaterControl.setPhase(current.reservationId, WaterControlPhase.RUNNING);
                     notifyWaterProgress("设备已启动，接水结束后将显示本次花费");
                     publishStatus("等待接水…");
@@ -258,7 +259,7 @@ public class WaterService extends Service {
     private void pollConsumption(Session current) {
         if (!isActive(current)) return;
         final int pollGeneration = ++current.pollGeneration;
-        if (System.currentTimeMillis() - current.monitoringStartedAt >= MAX_MONITOR_MILLIS) {
+        if (SystemClock.elapsedRealtime() - current.monitoringStartedElapsed >= MAX_MONITOR_MILLIS) {
             finishWithResult(
                     current,
                     "本次接水提醒已结束",
@@ -348,7 +349,7 @@ public class WaterService extends Service {
                     WaterConsumption consumption =
                             WaterConsumptionParser.INSTANCE.latestSince(
                                     json,
-                                    current.monitoringStartedAt,
+                                    scoreSinceMillis(current.monitoringStartedAt, current.scoreBaselineCaptured),
                                     current.did,
                                     current.scoreBaseline
                             );
@@ -396,12 +397,24 @@ public class WaterService extends Service {
 
     private void scheduleNextPoll(Session current) {
         if (!isActive(current)) return;
-        long interval = current.fastPolls > 0 ? 2_000L : POLL_INTERVAL_MILLIS;
+        long interval = nextPollDelayMillis(
+                SystemClock.elapsedRealtime() - current.monitoringStartedElapsed, current.fastPolls);
         if (current.fastPolls > 0) current.fastPolls--;
         mainHandler.postDelayed(
                 () -> pollConsumption(current),
                 interval
         );
+    }
+
+    static long nextPollDelayMillis(long elapsedMillis, int fastPolls) {
+        return fastPolls > 0 || elapsedMillis < FAST_POLL_WINDOW_MILLIS
+                ? FAST_POLL_INTERVAL_MILLIS : POLL_INTERVAL_MILLIS;
+    }
+
+    static long scoreSinceMillis(long startedAt, boolean baselineCaptured) {
+        // Without a snapshot, second-resolution records from the start second are ambiguous.
+        // Let the bill path resolve those instead of attributing a previous session's points.
+        return baselineCaptured ? startedAt : startedAt + 1_000L;
     }
 
     private void finishConsumption(Session current, WaterConsumption consumption) {
@@ -501,6 +514,7 @@ public class WaterService extends Service {
         if (reservationId != current.reservationId || !isActive(current)) return;
         session = null;
         mainHandler.removeCallbacksAndMessages(null);
+        releaseWakeLock();
         releaseReservation(current.reservationId);
         stopForeground(STOP_FOREGROUND_REMOVE);
         publishStatus(null);
@@ -516,6 +530,7 @@ public class WaterService extends Service {
         if (!isActive(current)) return;
         session = null;
         mainHandler.removeCallbacksAndMessages(null);
+        releaseWakeLock();
         releaseReservation(current.reservationId);
         stopForeground(STOP_FOREGROUND_REMOVE);
         showResult(title, text, recovery);
@@ -532,6 +547,7 @@ public class WaterService extends Service {
     ) {
         session = null;
         mainHandler.removeCallbacksAndMessages(null);
+        releaseWakeLock();
         releaseReservation(ownedReservationId);
         stopForeground(STOP_FOREGROUND_REMOVE);
         showResult(title, text, recovery);
@@ -587,6 +603,11 @@ public class WaterService extends Service {
             ACTIVE_RESERVATION_ID.compareAndSet(reservationId, 0L);
             WaterControl.clear(reservationId);
         }
+    }
+
+    private void releaseWakeLock() {
+        if (wakeLock != null && wakeLock.isHeld()) wakeLock.release();
+        wakeLock = null;
     }
 
     private void onMain(Runnable action) {
@@ -646,6 +667,7 @@ public class WaterService extends Service {
     public void onDestroy() {
         session = null;
         mainHandler.removeCallbacksAndMessages(null);
+        releaseWakeLock();
         releaseReservation(ownedReservationId);
         // 服务被系统杀掉时兜底，避免小部件永远停在「等待接水…」
         if (activeStatus != null) publishStatus(null);
@@ -667,9 +689,10 @@ public class WaterService extends Service {
         final String accountKey;
         Set<String> billBaseline = Collections.emptySet();
         Set<String> scoreBaseline = Collections.emptySet();
-        int pendingBaselines;
         boolean baselineFrozen;
+        boolean scoreBaselineCaptured;
         long monitoringStartedAt;
+        long monitoringStartedElapsed;
         int pollGeneration;
         int fastPolls;
         boolean stopRequested;
