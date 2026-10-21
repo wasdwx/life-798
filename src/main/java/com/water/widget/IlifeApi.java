@@ -176,9 +176,19 @@ public class IlifeApi {
 
     /** 用指定 token 获取账户信息（uid/eid/手机号）。 */
     public static void viewInfoWithToken(final String token, final JsonCallback cb) {
+        viewInfoWithToken(token, "1,5", VERSION_CODE, cb);
+    }
+
+    /**
+     * 用指定 token + 指定客户端身份获取账户信息。
+     * 供 AuthGuard 做登录态复核使用：复核必须使用与失败请求相同的身份头，
+     * 否则"身份不一致"本身就会导致复核失败，把误判坐实。
+     */
+    public static void viewInfoWithToken(final String token, final String appType,
+                                         final String versionCode, final JsonCallback cb) {
         new Thread(() -> {
             try {
-                String body = httpRaw("GET", GATEWAY + "/acc/view-info", null, token);
+                String body = httpRawApp("GET", GATEWAY + "/acc/view-info", null, token, appType, versionCode);
                 cb.onResult(new JSONObject(body), null);
             } catch (Exception e) {
                 cb.onResult(null, e.getMessage());

@@ -58,7 +58,8 @@ class ScoreActivity : ComponentActivity() {
                         AccountStore.updateScore(this, account.phone, token, state.validScore)
                     }
                     if (missionJson?.optInt("code", -999) == -99) {
-                        AccountStore.invalidateToken(this, account.phone, token, platform == TaskPlatform.APP)
+                        // 先复核再判定（见 AuthGuard）
+                        AuthGuard.handleAuthFailure(this, account.phone, platform, token, "score")
                     }
                     updateScore(generation, index, state)
                 }

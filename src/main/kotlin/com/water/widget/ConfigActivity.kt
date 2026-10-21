@@ -322,10 +322,20 @@ class ConfigActivity : ComponentActivity() {
             if (json?.optInt("code", -999) == 0) {
                 score = json.optJSONObject("data")?.optJSONObject("accScoreRsp")?.optInt("validScore")
             } else if (json?.optInt("code", -999) == -99) {
-                AccountStore.invalidateToken(this, account.phone, token, platform == TaskPlatform.APP)
-                if (!destroyed && generation == scoreGeneration) {
-                    viewModel.reloadAccounts()
-                    toast("${if (platform == TaskPlatform.APP) "设备" else "积分"}登录已过期，请重新登录")
+                // 先复核再判定：误判时保留登录信息（见 AuthGuard）
+                val platformLabel = if (platform == TaskPlatform.APP) "设备" else "积分"
+                AuthGuard.handleAuthFailure(this, account.phone, platform, token, "config") { verdict ->
+                    runOnUiThread {
+                        if (destroyed || generation != scoreGeneration) return@runOnUiThread
+                        viewModel.reloadAccounts()
+                        toast(
+                            when (verdict) {
+                                AuthGuard.Verdict.RECOVERED -> "登录信息复核通过，未失效"
+                                AuthGuard.Verdict.SUSPECT -> platformLabel + "登录疑似失效，正在复核"
+                                AuthGuard.Verdict.CONFIRMED -> platformLabel + "登录已过期，请重新登录"
+                            }
+                        )
+                    }
                 }
             }
             complete()
