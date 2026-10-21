@@ -617,6 +617,9 @@ public class IlifeApi {
     private static String httpRawApp(String method, String urlStr, String body,
                                      String token, String appType, String versionCode)
             throws Exception {
+        // 登录态诊断（是否落盘由 DiagLog 开关决定）；记录失败绝不影响主流程。
+        final long diagStartedAt = System.currentTimeMillis();
+        final boolean[] diagRecorded = new boolean[1];
         HttpURLConnection c = (HttpURLConnection) new URL(urlStr).openConnection();
         try {
             c.setRequestMethod(method);
@@ -644,7 +647,12 @@ public class IlifeApi {
                 // Reject implausible intermediaries' dates instead of poisoning every subsequent signature.
                 if (Math.abs(offset) <= 24 * 60 * 60_000L) appClockOffsetMillis = offset;
             }
-            if (http == 401) return new JSONObject().put("code", -99).put("msg", "登录已过期（HTTP 401）").toString();
+            if (http == 401) {
+                String expired = new JSONObject().put("code", -99).put("msg", "登录已过期（HTTP 401）").toString();
+                recordDiagnostics(method, urlStr, appType, versionCode, body, http, expired, diagStartedAt);
+                diagRecorded[0] = true;
+                return expired;
+            }
             InputStream stream = http >= 400 ? c.getErrorStream() : c.getInputStream();
             if (stream == null) throw new java.io.IOException("HTTP " + http + "，响应为空");
             BufferedReader rd = new BufferedReader(new InputStreamReader(
@@ -654,13 +662,34 @@ public class IlifeApi {
             while ((line = rd.readLine()) != null) sb.append(line);
             rd.close();
             String response = sb.toString();
+            recordDiagnostics(method, urlStr, appType, versionCode, body, http, response, diagStartedAt);
+            diagRecorded[0] = true;
             if (http >= 400) {
                 try { new JSONObject(response); }
                 catch (JSONException ex) { throw new java.io.IOException("HTTP " + http + "，服务端响应异常"); }
             }
             return response;
+        } catch (Exception ex) {
+            if (!diagRecorded[0]) {
+                recordDiagnostics(method, urlStr, appType, versionCode, body, -1,
+                        "EXCEPTION " + ex.getClass().getSimpleName() + ": " + ex.getMessage(), diagStartedAt);
+            }
+            throw ex;
         } finally {
             c.disconnect();
+        }
+    }
+
+    /**
+     * 记录一次 HTTP 往返（是否落盘由 DiagLog 的开关决定：正式版默认关闭、debug 默认开启）。
+     * 敏感字段（手机号/短信码/token/uid 等）在 AuthRedactor 内部统一脱敏，绝不落原文。
+     */
+    private static void recordDiagnostics(String method, String url, String appType, String versionCode,
+                                          String requestBody, int http, String response, long startedAt) {
+        try {
+            DiagLog.INSTANCE.record(method, url, appType, versionCode,
+                    requestBody, http, response, startedAt);
+        } catch (Throwable ignored) {
         }
     }
 

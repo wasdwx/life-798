@@ -21,6 +21,10 @@ local.properties
 docs/
 .playwright-mcp/
 
+# 本地调查 / 逆向 / 实验产物（含第三方客户端源码快照、反编译产物、分析报告）
+.analysis/
+office-demo/
+
 # 签名密钥与证书，禁止提交
 *.jks
 *.keystore

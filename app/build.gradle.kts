@@ -105,6 +105,16 @@ android {
                 "proguard-rules.pro"
             )
         }
+        // 诊断包同样启用 R8 优化：debug 默认不混淆、不裁剪资源，包体约为 release 的 7 倍，
+        // 运行时也明显更卡。这里保持 isDebuggable 默认 true（run-as 可拉日志），只打开优化。
+        getByName("debug") {
+            isMinifyEnabled = true
+            isShrinkResources = true
+            proguardFiles(
+                getDefaultProguardFile("proguard-android-optimize.txt"),
+                "proguard-rules.pro"
+            )
+        }
     }
 }
 

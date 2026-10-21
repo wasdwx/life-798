@@ -13,6 +13,7 @@ import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -31,14 +32,20 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextDecoration
+import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.app.NotificationManagerCompat
+import androidx.core.content.FileProvider
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.water.widget.ui.SectionCard
 import com.water.widget.ui.WaterTheme
@@ -54,6 +61,9 @@ class AppSettingsActivity : ComponentActivity() {
     private var notificationsAllowed by mutableStateOf(false)
     private var policy by mutableStateOf(UpdatePolicy.DAILY)
     private var previews by mutableStateOf(false)
+    private var diagEnabled by mutableStateOf(false)
+    private var diagVerbose by mutableStateOf(false)
+    private var diagSize by mutableLongStateOf(0L)
     private val requestNotifications = registerForActivityResult(ActivityResultContracts.RequestPermission()) {
         reloadSettings()
     }
@@ -70,7 +80,7 @@ class AppSettingsActivity : ComponentActivity() {
                     .padding(20.dp).navigationBarsPadding(), verticalArrangement = Arrangement.spacedBy(16.dp)) {
                     TextButton(onClick = { finish() }) { Text("返回") }
                     Text("任务与更新", fontSize = 28.sp, fontWeight = FontWeight.Bold)
-                    SectionCard("每日自动积分任务", "执行全部已登录账号的签到与积分任务；不会自动启动出水设备。") {
+                    SectionCard("每日自动积分任务") {
                         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                             Text("启用自动任务", Modifier.weight(1f))
                             Switch(checked = autoEnabled, onCheckedChange = { enabled ->
@@ -103,7 +113,46 @@ class AppSettingsActivity : ComponentActivity() {
                         Text("部分系统仍可能限制后台运行。任务最长运行一小时；可随时从任务页停止。",
                             fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
-                    SectionCard("检查更新", "只检查你的个人仓库 wasdwx/life-798；不会静默安装。") {
+                    SectionCard("诊断日志") {
+                        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                            Text("记录诊断日志", Modifier.weight(1f))
+                            Switch(checked = diagEnabled, onCheckedChange = { value ->
+                                DiagLog.setEnabled(this@AppSettingsActivity, value)
+                                diagEnabled = value
+                                diagSize = DiagLog.totalBytes()
+                            })
+                        }
+                        if (diagEnabled) {
+                            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                                Text("详细模式（记录脱敏后的请求/响应摘要）", Modifier.weight(1f))
+                                Switch(checked = diagVerbose, onCheckedChange = { value ->
+                                    DiagLog.setVerbose(this@AppSettingsActivity, value)
+                                    diagVerbose = value
+                                })
+                            }
+                            Text("已用 " + formatBytes(diagSize) + "；超过上限会自动滚动，异常单独保留。",
+                                fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                Button(onClick = { exportDiagnostics(errorsOnly = false) }) { Text("导出日志") }
+                                TextButton(onClick = { exportDiagnostics(errorsOnly = true) }) { Text("只导出异常") }
+                                TextButton(onClick = {
+                                    DiagLog.clear()
+                                    diagSize = 0L
+                                    Toast.makeText(this@AppSettingsActivity, "已清空", Toast.LENGTH_SHORT).show()
+                                }) { Text("清空") }
+                            }
+                        } else {
+                            Text("关闭时不会写入任何内容。", fontSize = 12.sp,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+                    }
+                    SectionCard("检查更新") {
+                        Text(buildAnnotatedString {
+                            append("github仓库：")
+                            withStyle(SpanStyle(color = MaterialTheme.colorScheme.primary, textDecoration = TextDecoration.Underline)) {
+                                append(AppUpdates.REPOSITORY_URL.removePrefix("https://github.com/"))
+                            }
+                        }, modifier = Modifier.clickable { openUrl(AppUpdates.REPOSITORY_URL) })
                         Text(update.message)
                         Button(onClick = { updates.check(manual = true) }, enabled = !update.checking) { Text("检查更新") }
                         update.available?.let { release ->
@@ -150,6 +199,35 @@ class AppSettingsActivity : ComponentActivity() {
         notificationsAllowed = NotificationManagerCompat.from(this).areNotificationsEnabled()
         policy = AppUpdates.policy(this)
         previews = AppUpdates.includePrereleases(this)
+        diagEnabled = DiagLog.isEnabled()
+        diagVerbose = DiagLog.isVerbose()
+        diagSize = DiagLog.totalBytes()
+    }
+
+    private fun exportDiagnostics(errorsOnly: Boolean) {
+        val file = DiagLog.exportZip(this, errorsOnly)
+        if (file == null) {
+            Toast.makeText(this, "导出失败：没有可导出的日志", Toast.LENGTH_SHORT).show()
+            return
+        }
+        val uri = FileProvider.getUriForFile(this, "$packageName.fileprovider", file)
+        val send = Intent(Intent.ACTION_SEND).apply {
+            type = "application/zip"
+            putExtra(Intent.EXTRA_STREAM, uri)
+            putExtra(Intent.EXTRA_SUBJECT, "WaterWidget 诊断日志")
+            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        }
+        try {
+            startActivity(Intent.createChooser(send, "导出诊断日志"))
+        } catch (_: RuntimeException) {
+            Toast.makeText(this, "没有可用的分享应用", Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    private fun formatBytes(bytes: Long): String = when {
+        bytes >= 1024L * 1024L -> "%.1f MB".format(bytes / 1024.0 / 1024.0)
+        bytes >= 1024L -> "%.1f KB".format(bytes / 1024.0)
+        else -> bytes.toString() + " B"
     }
 
     private fun openSystemSettings(action: String) {
