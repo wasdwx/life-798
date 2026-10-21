@@ -38,6 +38,8 @@ class TaskForegroundService : Service() {
     private var stoppingNormally = false
     private var completedLanes = 0
     private var hadFailures = false
+    // 本批是否存在「连接层失败」（超时/断网/DNS），用于决定要不要自动补跑
+    private var networkFailures = false
     private var lastWidgetRefreshAt = 0L
     private var latestStartId = 0
     private val expiredTokens = mutableSetOf<String>()
@@ -132,6 +134,7 @@ class TaskForegroundService : Service() {
         taskRateLimiter.clear()
         completedLanes = 0
         hadFailures = false
+        networkFailures = false
         expiredTokens.clear()
         running = true
         stoppingNormally = false
@@ -151,22 +154,30 @@ class TaskForegroundService : Service() {
             }
         mainHandler.postDelayed(batchTimeout, MAX_BATCH_MILLIS)
 
-        plannedLanes.forEachIndexed { laneIndex, lane ->
-            runAccountLane(
-                accounts = lane.accounts,
-                index = 0,
-                laneId = laneIndex + 1,
-                laneCount = plannedLanes.size,
-                runGeneration = runGeneration
-            ) {
-                if (!isActive(runGeneration)) return@runAccountLane
-                TaskRunRepository.completeLane(laneIndex + 1)
-                completedLanes += 1
-                // 用 >= 而不是 ==：万一某个通道回调多走了一次，用相等判断会直接错过收尾，
-                // 仓库的 running 就永远挂在 true 上，之后每次启动都被当成「已在运行」。
-                if (completedLanes >= plannedLanes.size) finishRun()
+        // 息屏/刚唤醒时网络常常还停在 CONNECTING，或者「连着 Wi-Fi 但未验证」，
+        // 这时立刻发请求会瞬间失败、整批任务报废。先等系统确认网络可用（最多 20 秒）。
+        Thread {
+            NetReady.await(this)
+            onMain {
+                if (!isActive(runGeneration)) return@onMain
+                plannedLanes.forEachIndexed { laneIndex, lane ->
+                    runAccountLane(
+                        accounts = lane.accounts,
+                        index = 0,
+                        laneId = laneIndex + 1,
+                        laneCount = plannedLanes.size,
+                        runGeneration = runGeneration
+                    ) {
+                        if (!isActive(runGeneration)) return@runAccountLane
+                        TaskRunRepository.completeLane(laneIndex + 1)
+                        completedLanes += 1
+                        // 用 >= 而不是 ==：万一某个通道回调多走了一次，用相等判断会直接错过收尾，
+                        // 仓库的 running 就永远挂在 true 上，之后每次启动都被当成「已在运行」。
+                        if (completedLanes >= plannedLanes.size) finishRun()
+                    }
+                }
             }
-        }
+        }.start()
         return START_NOT_STICKY
     }
 
@@ -280,11 +291,20 @@ class TaskForegroundService : Service() {
                     appendTaskLog(
                         "  [$account][$platform] 获取任务列表失败: " + TaskProtocol.failure(missionJson, missionErr, token)
                     )
-                    if (platform == TaskPlatform.MAIN && account.hasAppToken() && missionJson?.optInt("code") == -99) {
-                        appendTaskLog("  主平台登录失效，改为执行有效的 App 平台任务")
+                    // missionJson == null 是连接层失败（超时/DNS/断网），不是服务端明确拒绝。
+                    // 这种时候主平台换一个通道（App 平台）往往能通，别直接放弃这个账号。
+                    val networkFailure = missionJson == null
+                    val mainExpired = missionJson?.optInt("code") == -99
+                    if (platform == TaskPlatform.MAIN && account.hasAppToken() && (mainExpired || networkFailure)) {
+                        appendTaskLog(
+                            if (networkFailure) "  主平台网络失败，改为执行 App 平台任务"
+                            else "  主平台登录失效，改为执行有效的 App 平台任务"
+                        )
                         loadAndRunAccountTasks(account, laneId, runGeneration, TaskPlatform.APP, done)
                         return@onMain
                     }
+                    // 连接层失败才记，用于收尾时决定是否自动补跑
+                    if (missionJson == null) networkFailures = true
                     TaskRunRepository.updateLane(
                         laneId = laneId,
                         currentTask = "任务列表获取失败",
@@ -678,6 +698,13 @@ class TaskForegroundService : Service() {
                 "===== 全部完成，本次获得 $gained 分 ====="
             }
         )
+        // 整批都栽在网络上的话，别等明天：+15/+30/+60 分钟各补跑一次（最多 3 次）。
+        // 只要这批没有网络失败，就把之前的补跑计划取消掉。
+        if (networkFailures) {
+            AutoTasks.scheduleCatchUp(this)
+        } else {
+            AutoTasks.clearCatchUp(this)
+        }
         TaskRunRepository.finish(partial = hadFailures)
         taskLease?.let(TaskExecutionCoordinator::release)
         taskLease = null

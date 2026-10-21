@@ -624,8 +624,65 @@ public class IlifeApi {
         return httpRawApp(method, urlStr, body, token, appType, VERSION_CODE);
     }
 
+    /** 幂等 GET 的重试退避（毫秒）。写操作与设备控制一律不重试。 */
+    private static final long[] RETRY_DELAYS_MS = {3000L, 8000L, 20000L};
+
     private static String httpRawApp(String method, String urlStr, String body,
                                      String token, String appType, String versionCode)
+            throws Exception {
+        final int maxAttempts = isRetryable(method, urlStr) ? RETRY_DELAYS_MS.length + 1 : 1;
+        Exception last = null;
+        for (int attempt = 0; attempt < maxAttempts; attempt++) {
+            if (attempt > 0) {
+                long delay = RETRY_DELAYS_MS[attempt - 1];
+                try {
+                    DiagLog.INSTANCE.warn("RETRY " + attempt + "/" + (maxAttempts - 1)
+                            + " in " + delay + "ms " + method + " "
+                            + AuthRedactor.INSTANCE.maskUrl(urlStr));
+                } catch (Throwable ignored) {
+                }
+                try {
+                    Thread.sleep(delay);
+                } catch (InterruptedException ie) {
+                    Thread.currentThread().interrupt();
+                    throw new java.io.IOException("请求被中断");
+                }
+            }
+            try {
+                return httpRawAppOnce(method, urlStr, body, token, appType, versionCode);
+            } catch (Exception ex) {
+                last = ex;
+                if (!isRetryableError(ex)) throw ex;
+            }
+        }
+        throw last != null ? last : new java.io.IOException("请求失败");
+    }
+
+    /** 只重试幂等 GET；/dev/ 是设备控制（GET 但有副作用），绝不重试。 */
+    private static boolean isRetryable(String method, String url) {
+        if (!"GET".equalsIgnoreCase(method)) return false;
+        return url == null || !url.contains("/dev/");
+    }
+
+    /** 只重试连接层失败；HTTP 4xx/5xx 是服务端明确应答，不重试。 */
+    private static boolean isRetryableError(Exception ex) {
+        if (ex instanceof HttpStatusException) return false;
+        return ex instanceof java.io.IOException;
+    }
+
+    /** HTTP 状态错误：服务端有明确应答，与连接层异常区分，避免被误重试。 */
+    static final class HttpStatusException extends java.io.IOException {
+        final int status;
+
+        HttpStatusException(int status, String message) {
+            super(message);
+            this.status = status;
+        }
+    }
+
+    /** 单次尝试，不含重试。 */
+    private static String httpRawAppOnce(String method, String urlStr, String body,
+                                         String token, String appType, String versionCode)
             throws Exception {
         // 登录态诊断（是否落盘由 DiagLog 开关决定）；记录失败绝不影响主流程。
         final long diagStartedAt = System.currentTimeMillis();
@@ -664,7 +721,7 @@ public class IlifeApi {
                 return expired;
             }
             InputStream stream = http >= 400 ? c.getErrorStream() : c.getInputStream();
-            if (stream == null) throw new java.io.IOException("HTTP " + http + "，响应为空");
+            if (stream == null) throw new HttpStatusException(http, "HTTP " + http + "，响应为空");
             BufferedReader rd = new BufferedReader(new InputStreamReader(
                     stream, "UTF-8"));
             StringBuilder sb = new StringBuilder();
@@ -676,7 +733,7 @@ public class IlifeApi {
             diagRecorded[0] = true;
             if (http >= 400) {
                 try { new JSONObject(response); }
-                catch (JSONException ex) { throw new java.io.IOException("HTTP " + http + "，服务端响应异常"); }
+                catch (JSONException ex) { throw new HttpStatusException(http, "HTTP " + http + "，服务端响应异常"); }
             }
             return response;
         } catch (Exception ex) {
