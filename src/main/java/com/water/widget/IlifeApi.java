@@ -82,6 +82,7 @@ public class IlifeApi {
                 c = (HttpURLConnection) new URL(u).openConnection();
                 c.setRequestMethod("GET");
                 c.setRequestProperty("User-Agent", UA);
+                c.setRequestProperty("VersionCode", VERSION_CODE);
                 c.setConnectTimeout(15000);
                 c.setReadTimeout(15000);
                 InputStream is = c.getInputStream();
@@ -416,7 +417,7 @@ public class IlifeApi {
             String token = useApp ? acc.appToken : acc.token;
             String appType = useApp ? "1,1" : "1,5";
             String url = GATEWAY + "/dev/start?did=" + enc(did)
-                    + "&upgrade=true&ptype=91&rcp=false";
+                    + "&upgrade=true&ptype=91&rcp=false&cnt=1";
             try {
                 String body = httpRawApp("GET", url, null, token, appType);
                 JSONObject json = new JSONObject(body);
@@ -463,7 +464,7 @@ public class IlifeApi {
                 return;
             }
             String url = GATEWAY + "/dev/start?did=" + enc(did)
-                    + "&upgrade=true&ptype=91&rcp=false";
+                    + "&upgrade=true&ptype=91&rcp=false&cnt=1";
             try {
                 String body = httpRawApp("GET", url, null, appToken, "1,1");
                 JSONObject json = new JSONObject(body);
