@@ -54,6 +54,10 @@ class ConfigActivity : ComponentActivity() {
     private var billSyncRunning = false
     /** 首次运行任务前必须确认风险提示；由 runTasksInHome 置位，Compose 侧弹窗。 */
     private var riskDialogPending by mutableStateOf(false)
+    /** 「我的」页内联开关的状态；在 onResume 重新读取，避免从设置页返回后显示旧值。 */
+    private var autoTaskEnabled by mutableStateOf(false)
+    private var autoUpdateEnabled by mutableStateOf(false)
+    private var waterUsageLabel by mutableStateOf("")
     private var destroyed = false
     /** 外观设置页可能改了显示模式，回到前台时对不上就重建 */
     private var appliedMode: AppThemeMode? = null
@@ -81,6 +85,7 @@ class ConfigActivity : ComponentActivity() {
         setContent {
             WaterTheme(mode = ThemeSettings.mode(this)) {
                 val state by viewModel.uiState.collectAsStateWithLifecycle()
+                val update by updates.state.collectAsStateWithLifecycle()
                 DashboardScreen(
                     state = state,
                     onLogin = { startActivity(Intent(this, LoginActivity::class.java)) },
@@ -104,7 +109,26 @@ class ConfigActivity : ComponentActivity() {
                     },
                     onStopDevice = { deviceId ->
                         if (!WaterService.stop(this, deviceId)) toast("当前设备不在可停止的会话中")
-                    }
+                    },
+                    autoTaskEnabled = autoTaskEnabled,
+                    onToggleAutoTask = { enabled ->
+                        AutoTasks.configure(this, enabled, AutoTasks.minute(this))
+                        autoTaskEnabled = enabled
+                        if (enabled) runWithNotificationPermission { true }
+                    },
+                    autoUpdateEnabled = autoUpdateEnabled,
+                    autoUpdateLabel = AppUpdates.policy(this).label,
+                    onToggleAutoUpdate = { enabled ->
+                        AppUpdates.prefs(this).edit()
+                            .putString("policy", if (enabled) UpdatePolicy.DAILY.name else UpdatePolicy.OFF.name)
+                            .apply()
+                        autoUpdateEnabled = enabled
+                        if (enabled) updates.check()
+                    },
+                    updateLabel = update.message.ifBlank { "点击检查是否有新版本" },
+                    onCheckUpdate = { updates.check(manual = true) },
+                    waterUsageLabel = waterUsageLabel,
+                    onOpenWaterUsage = { startActivity(Intent(this, AppSettingsActivity::class.java)) }
                 )
                 if (riskDialogPending) {
                     com.water.widget.ui.TaskRiskDialog(
@@ -115,7 +139,6 @@ class ConfigActivity : ComponentActivity() {
                         }
                     )
                 }
-                val update by updates.state.collectAsStateWithLifecycle()
                 var dismissedTag by rememberSaveable { mutableStateOf<String?>(null) }
                 update.available?.takeIf { it.tag != dismissedTag }?.let { release ->
                     AlertDialog(onDismissRequest = { dismissedTag = release.tag },
@@ -173,6 +196,14 @@ class ConfigActivity : ComponentActivity() {
         syncRecentBills()
         AutoTasks.schedule(this)
         updates.check()
+        // 「我的」页内联开关的状态：从设置页返回时同步刷新。
+        autoTaskEnabled = AutoTasks.enabled(this)
+        autoUpdateEnabled = AppUpdates.policy(this) != UpdatePolicy.OFF
+        val estimate = WaterUsageSettings.read(this)
+        waterUsageLabel = "¥%s 对应 %s ml · 统一比例".format(
+            estimate.amountYuan.toString().removeSuffix(".0"),
+            estimate.volumeMl.toInt()
+        )
     }
 
     override fun onDestroy() {

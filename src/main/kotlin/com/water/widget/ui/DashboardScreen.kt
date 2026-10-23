@@ -8,7 +8,6 @@ import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.spring
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.overscroll
 import androidx.compose.foundation.pager.HorizontalPager
@@ -16,6 +15,7 @@ import androidx.compose.foundation.pager.PagerState
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.rememberOverscrollEffect
 import androidx.compose.foundation.selection.selectable
+import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.foundation.withoutVisualEffect
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -44,12 +44,11 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowForwardIos
-import androidx.compose.material.icons.automirrored.filled.OpenInNew
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.AccountBalanceWallet
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.CheckCircle
-import androidx.compose.material.icons.filled.Code
+import androidx.compose.material.icons.filled.DarkMode
 import androidx.compose.material.icons.filled.DeleteOutline
 import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.Home
@@ -59,12 +58,14 @@ import androidx.compose.material.icons.filled.Palette
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.WaterDrop
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
@@ -75,12 +76,11 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
-import androidx.compose.ui.platform.LocalDensity
-import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -88,16 +88,22 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.LookaheadScope
+import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.zIndex
 import com.water.widget.AppThemeMode
+import com.water.widget.AppUpdates
 import com.water.widget.BuildConfig
-import com.water.widget.R
+import com.water.widget.TaskRiskConsent
 import com.water.widget.WaterControlPhase
 import com.water.widget.WaterControlSession
 import kotlinx.coroutines.launch
@@ -139,9 +145,21 @@ fun DashboardScreen(
     onStartDevice: (String) -> Unit,
     onStopDevice: (String) -> Unit = {},
     onSettings: () -> Unit = {},
+    onToggleAutoTask: (Boolean) -> Unit = {},
+    onToggleAutoUpdate: (Boolean) -> Unit = {},
+    onCheckUpdate: () -> Unit = {},
+    onOpenWaterUsage: () -> Unit = {},
+    autoTaskEnabled: Boolean = false,
+    autoUpdateEnabled: Boolean = false,
+    autoUpdateLabel: String = "",
+    updateLabel: String = "",
+    waterUsageLabel: String = "",
     modifier: Modifier = Modifier
 ) {
     val colors = MaterialTheme.colorScheme
+    val context = LocalContext.current
+    var taskRiskConfirmed by remember { mutableStateOf(TaskRiskConsent.isConfirmed(context)) }
+    var showTaskRiskDialog by rememberSaveable { mutableStateOf(false) }
     val pagerState = rememberPagerState(
         initialPage = DashboardTab.CONTROL.ordinal,
         pageCount = { DashboardTab.entries.size }
@@ -159,6 +177,8 @@ fun DashboardScreen(
     val pageTopPadding = WindowInsets.statusBars.asPaddingValues().calculateTopPadding() + 28.dp
     val bottomContentPadding = 92.dp +
         WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
+    var controlHeaderHeightPx by remember { mutableIntStateOf(0) }
+    val controlHeaderHeight = with(LocalDensity.current) { controlHeaderHeightPx.toDp() }
     var showAccountSwitcher by rememberSaveable { mutableStateOf(false) }
     var showSupportDialog by rememberSaveable { mutableStateOf(false) }
 
@@ -176,7 +196,7 @@ fun DashboardScreen(
                         isRefreshing = state.homeRefreshing,
                         onRefresh = onRefreshHome,
                         modifier = Modifier.fillMaxSize(),
-                        indicatorTopOffset = pageTopPadding + 50.dp
+                        indicatorTopOffset = pageTopPadding + controlHeaderHeight
                     ) { pullOffset ->
                         Column(
                             modifier = Modifier
@@ -185,7 +205,8 @@ fun DashboardScreen(
                                 .padding(start = 20.dp, top = pageTopPadding, end = 20.dp, bottom = bottomContentPadding),
                             verticalArrangement = Arrangement.spacedBy(16.dp)
                         ) {
-                            DashboardTitle(DashboardTab.CONTROL.title)
+                            DashboardTitle(DashboardTab.CONTROL.title,
+                                Modifier.onSizeChanged { controlHeaderHeightPx = it.height })
                             Column(
                                 modifier = Modifier.offset(y = pullOffset),
                                 verticalArrangement = Arrangement.spacedBy(16.dp)
@@ -193,6 +214,7 @@ fun DashboardScreen(
                                 HomeTab(
                                     state = state.summary,
                                     syncing = state.deviceSyncing,
+                                    onLogin = onLogin,
                                     onSwitchAccount = { showAccountSwitcher = true },
                                     onFetchDevices = onFetchDevices,
                                     onAddDevice = onAddDevice,
@@ -218,7 +240,11 @@ fun DashboardScreen(
                         verticalArrangement = Arrangement.spacedBy(16.dp)
                     ) {
                         DashboardTitle(DashboardTab.TASK.title)
-                        TaskScreen(state = state.tasks, onRun = onRunTasks, onStop = onStopTasks)
+                        TaskScreen(
+                            state = state.tasks,
+                            onRun = { if (taskRiskConfirmed) onRunTasks() else showTaskRiskDialog = true },
+                            onStop = onStopTasks
+                        )
                         Spacer(Modifier.height(8.dp))
                     }
                 }
@@ -244,7 +270,16 @@ fun DashboardScreen(
                             themeMode = themeMode,
                             onOpenAppearanceSettings = onAppearance,
                             onOpenSettings = onSettings,
-                            onOpenSupport = { showSupportDialog = true }
+                            onOpenSupport = { showSupportDialog = true },
+                            autoTaskEnabled = autoTaskEnabled,
+                            onToggleAutoTask = onToggleAutoTask,
+                            autoUpdateEnabled = autoUpdateEnabled,
+                            autoUpdateLabel = autoUpdateLabel,
+                            onToggleAutoUpdate = onToggleAutoUpdate,
+                            updateLabel = updateLabel,
+                            onCheckUpdate = onCheckUpdate,
+                            waterUsageLabel = waterUsageLabel,
+                            onOpenWaterUsage = onOpenWaterUsage
                         )
                         Spacer(Modifier.height(8.dp))
                     }
@@ -277,12 +312,20 @@ fun DashboardScreen(
     if (showSupportDialog) {
         SupportDeveloperDialog(onDismiss = { showSupportDialog = false })
     }
+    if (!taskRiskConfirmed && (pagerState.settledPage == DashboardTab.TASK.ordinal || showTaskRiskDialog)) {
+        TaskRiskDialog(onConfirm = {
+            TaskRiskConsent.confirm(context)
+            taskRiskConfirmed = true
+            showTaskRiskDialog = false
+        })
+    }
 }
 
 @Composable
 private fun HomeTab(
     state: DashboardSummaryUiState,
     syncing: Boolean,
+    onLogin: () -> Unit,
     onSwitchAccount: () -> Unit,
     onFetchDevices: () -> Unit,
     onAddDevice: () -> Unit,
@@ -291,10 +334,9 @@ private fun HomeTab(
     onSelectDevice: (String) -> Unit,
     onStartDevice: (String) -> Unit,
     onStopDevice: (String) -> Unit,
-    waterSession: WaterControlSession?
+    waterSession: WaterControlSession? = null
 ) {
-    HeroCard(state = state, onSwitchAccount = onSwitchAccount)
-    TodayOverviewCard(usage = state.usage)
+    HeroCard(state = state, onAccountAction = if (state.hasAccount) onSwitchAccount else onLogin)
     DeviceCard(
         state = state,
         syncing = syncing,
@@ -307,78 +349,62 @@ private fun HomeTab(
         onStopDevice = onStopDevice,
         waterSession = waterSession
     )
+    if (state.hasAccount) TodayOverviewCard(usage = state.usage)
 }
 
 @Composable
-private fun DashboardTitle(title: String) {
+private fun DashboardTitle(title: String, modifier: Modifier = Modifier) {
     Text(
         text = title,
+        modifier = modifier,
         color = MaterialTheme.colorScheme.onBackground,
         fontSize = 28.sp,
         fontWeight = FontWeight.Bold,
-        lineHeight = 34.sp,
-        maxLines = 1
+        lineHeight = 34.sp
     )
 }
 
 @Composable
-private fun HeroCard(state: DashboardSummaryUiState, onSwitchAccount: () -> Unit) {
+private fun HeroCard(state: DashboardSummaryUiState, onAccountAction: () -> Unit) {
     val colors = MaterialTheme.colorScheme
     val cardColor = colors.secondaryContainer
     val contentColor = colors.onSecondaryContainer
     Card(
-        shape = RoundedCornerShape(30.dp),
+        shape = WaterShapeTokens.card,
         colors = CardDefaults.cardColors(containerColor = cardColor),
         elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)
     ) {
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(20.dp),
-            verticalArrangement = Arrangement.spacedBy(18.dp)
+                .padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp)
         ) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Column(Modifier.weight(1f)) {
                     Text("账号", color = contentColor.copy(alpha = 0.70f), fontSize = 12.sp)
-                    Text(state.accountTitle, color = contentColor, fontSize = 20.sp, fontWeight = FontWeight.Bold, maxLines = 1)
+                    Text(state.accountTitle, color = contentColor, fontSize = 18.sp, fontWeight = FontWeight.Bold,
+                        maxLines = 1, overflow = TextOverflow.Ellipsis)
                     if (state.hasAccount) {
-                        Text(state.accountSubtitle, color = contentColor.copy(alpha = 0.66f), fontSize = 11.sp)
+                        Text(state.accountSubtitle, color = contentColor, fontSize = 12.sp)
                     }
                 }
-                Surface(
-                    onClick = onSwitchAccount,
-                    shape = RoundedCornerShape(14.dp),
-                    color = colors.surface
-                ) {
-                    Row(
-                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Text("切换", color = contentColor, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
-                        Icon(Icons.Default.KeyboardArrowDown, contentDescription = "切换账号", tint = contentColor, modifier = Modifier.size(16.dp))
-                    }
+                TextButton(onClick = onAccountAction) {
+                    Text(if (state.hasAccount) "切换账号" else "去登录", fontWeight = FontWeight.SemiBold)
+                    if (state.hasAccount) Icon(Icons.Default.KeyboardArrowDown, contentDescription = null,
+                        modifier = Modifier.size(18.dp))
                 }
             }
-            Surface(
-                shape = RoundedCornerShape(18.dp),
-                color = colors.surface,
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 14.dp)) {
-                    Text("可用额度", color = contentColor.copy(alpha = 0.70f), fontSize = 12.sp)
-                    Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                        Text(
-                            state.scoreTitle,
-                            color = contentColor,
-                            fontSize = 30.sp,
-                            fontWeight = FontWeight.Bold,
-                            maxLines = 1
-                        )
-                        if (state.hasAccount) {
-                            Text(state.scoreSubtitle, color = contentColor, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
-                        }
-                    }
+            if (state.hasAccount) {
+                HorizontalDivider(color = contentColor.copy(alpha = 0.12f))
+                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Text("可用额度", Modifier.weight(1f), color = contentColor, fontSize = 13.sp)
+                    Text(state.scoreTitle, color = contentColor, fontSize = 24.sp, fontWeight = FontWeight.Bold)
                 }
+                Text(state.scoreSubtitle, color = contentColor, fontSize = 12.sp)
+            } else {
+                Text("登录后添加设备，即可使用出水控制。", color = contentColor, fontSize = 13.sp)
             }
         }
     }
@@ -386,7 +412,7 @@ private fun HeroCard(state: DashboardSummaryUiState, onSwitchAccount: () -> Unit
 
 @Composable
 private fun TodayOverviewCard(usage: WaterUsageUiState) {
-    InfoCard(title = "今天概览", subtitle = "") {
+    InfoCard(title = "今天概览", subtitle = usage.syncNote) {
         Row(horizontalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.fillMaxWidth()) {
             UsageMetric(
                 label = "今日用水花费",
@@ -405,6 +431,10 @@ private fun TodayOverviewCard(usage: WaterUsageUiState) {
                 )
             }
         }
+        if (usage.showWaterEstimate) {
+            Text("水量按统一比例估算，不区分设备", Modifier.padding(top = 8.dp),
+                style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
     }
 }
 
@@ -418,7 +448,7 @@ private fun UsageMetric(
 ) {
     Surface(
         modifier = modifier,
-        shape = RoundedCornerShape(20.dp),
+        shape = WaterShapeTokens.card,
         color = accent
     ) {
         Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(5.dp)) {
@@ -430,7 +460,7 @@ private fun UsageMetric(
 
 @OptIn(ExperimentalSharedTransitionApi::class)
 @Composable
-private fun DeviceCard(
+internal fun DeviceCard(
     state: DashboardSummaryUiState,
     syncing: Boolean,
     onFetchDevices: () -> Unit,
@@ -440,9 +470,12 @@ private fun DeviceCard(
     onSelectDevice: (String) -> Unit,
     onStartDevice: (String) -> Unit,
     onStopDevice: (String) -> Unit,
-    waterSession: WaterControlSession?
+    waterSession: WaterControlSession? = null
 ) {
     val canStart = state.hasAccount && state.hasAppToken
+    // 本地用 WaterControl 的 phase 表达会话进度，不引入上游那套 starting: Boolean 语义。
+    val sessionPhase = waterSession?.phase
+    val sessionDeviceId = waterSession?.deviceId
     var editingDevice by remember { mutableStateOf<DeviceUiState?>(null) }
     var editedName by remember { mutableStateOf("") }
     var removingDevice by remember { mutableStateOf<DeviceUiState?>(null) }
@@ -456,7 +489,7 @@ private fun DeviceCard(
         }
     }
     Card(
-        shape = RoundedCornerShape(26.dp),
+        shape = WaterShapeTokens.card,
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
         elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)
     ) {
@@ -493,9 +526,7 @@ private fun DeviceCard(
                             }
                             DeviceListItem(
                                 device = device,
-                                canStart = if (waterSession?.deviceId == device.id)
-                                    waterSession.phase == WaterControlPhase.RUNNING else canStart && waterSession == null,
-                                actionLabel = waterSession?.takeIf { it.deviceId == device.id }?.phase?.label ?: "启动",
+                                canStart = canStart,
                                 modifier = Modifier
                                     .zIndex(layer)
                                     .animateBounds(
@@ -515,10 +546,12 @@ private fun DeviceCard(
                                     editingDevice = device
                                     editedName = device.name
                                 },
-                                onStart = {
-                                    if (waterSession?.deviceId == device.id) onStopDevice(device.id)
-                                    else onStartDevice(device.id)
-                                }
+                                onStart = { onStartDevice(device.id) },
+                                stopping = sessionDeviceId == device.id &&
+                                    (sessionPhase == WaterControlPhase.STOPPING || sessionPhase == WaterControlPhase.SETTLING),
+                                starting = sessionDeviceId == device.id && sessionPhase == WaterControlPhase.STARTING,
+                                running = sessionDeviceId == device.id && sessionPhase == WaterControlPhase.RUNNING,
+                                onStop = { onStopDevice(device.id) }
                             )
                             Spacer(Modifier.height(10.dp))
                         }
@@ -531,6 +564,7 @@ private fun DeviceCard(
         }
     }
     editingDevice?.let { device ->
+        val canRemove = sessionDeviceId != device.id
         AlertDialog(
             onDismissRequest = { editingDevice = null },
             title = { Text("管理设备", fontWeight = FontWeight.Bold) },
@@ -544,6 +578,7 @@ private fun DeviceCard(
                         label = { Text("显示名称") },
                         singleLine = true
                     )
+                    if (!canRemove) Text("请先停止接水，再移除设备", color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
             },
             confirmButton = {
@@ -556,7 +591,7 @@ private fun DeviceCard(
                 TextButton(onClick = {
                     editingDevice = null
                     removingDevice = device
-                }) {
+                }, enabled = canRemove) {
                     Icon(Icons.Default.DeleteOutline, contentDescription = null)
                     Text("移除")
                 }
@@ -567,12 +602,12 @@ private fun DeviceCard(
         AlertDialog(
             onDismissRequest = { removingDevice = null },
             title = { Text("移除 ${device.name}？") },
-            text = { Text("该设备将从本地列表移除，并尝试取消服务器收藏。") },
+            text = { Text("将从此手机移除设备，并取消官方账号中的收藏。") },
             confirmButton = {
                 Button(onClick = {
                     removingDevice = null
                     onRemoveDevice(device.id)
-                }) { Text("移除") }
+                }, enabled = sessionDeviceId != device.id) { Text("移除") }
             },
             dismissButton = { TextButton(onClick = { removingDevice = null }) { Text("取消") } }
         )
@@ -583,11 +618,14 @@ private fun DeviceCard(
 private fun DeviceListItem(
     device: DeviceUiState,
     canStart: Boolean,
-    actionLabel: String,
     modifier: Modifier = Modifier,
     onSelect: () -> Unit,
     onManage: () -> Unit,
-    onStart: () -> Unit
+    onStart: () -> Unit,
+    stopping: Boolean,
+    starting: Boolean,
+    running: Boolean,
+    onStop: () -> Unit
 ) {
     val colors = MaterialTheme.colorScheme
     val containerColor by animateColorAsState(
@@ -601,7 +639,7 @@ private fun DeviceListItem(
     Card(
         onClick = onSelect,
         modifier = modifier,
-        shape = RoundedCornerShape(20.dp),
+        shape = WaterShapeTokens.card,
         colors = CardDefaults.cardColors(containerColor = containerColor),
         elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)
     ) {
@@ -615,9 +653,12 @@ private fun DeviceListItem(
                     device.name,
                     color = colors.onSurface,
                     fontWeight = FontWeight.SemiBold,
-                    fontSize = 14.sp
+                    fontSize = 15.sp,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis
                 )
-                Text(device.id, color = colors.onSurfaceVariant, fontSize = 11.sp)
+                Text(device.id, color = colors.onSurfaceVariant, fontSize = 12.sp,
+                    maxLines = 1, overflow = TextOverflow.Ellipsis)
                 if (device.isControlCenterDevice) {
                     Surface(
                         shape = RoundedCornerShape(8.dp),
@@ -634,7 +675,7 @@ private fun DeviceListItem(
                                 contentDescription = null,
                                 modifier = Modifier.size(12.dp)
                             )
-                            Text("控制中心默认", fontSize = 10.sp, fontWeight = FontWeight.SemiBold)
+                            Text("控制中心默认", fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
                         }
                     }
                 }
@@ -643,11 +684,11 @@ private fun DeviceListItem(
                 Icon(Icons.Default.MoreVert, contentDescription = "管理设备")
             }
             Button(
-                onClick = onStart,
-                enabled = canStart,
+                onClick = if (running) onStop else onStart,
+                enabled = canStart && !starting && !stopping,
                 shape = RoundedCornerShape(14.dp)
             ) {
-                Text(actionLabel)
+                Text(if (running || stopping) "停止" else "启动")
             }
         }
     }
@@ -656,16 +697,16 @@ private fun DeviceListItem(
 @Composable
 private fun ConfigurationNotice(state: DashboardSummaryUiState) {
     val (title, detail) = when {
-        !state.hasAccount -> "尚未登录账号" to "登录账号后，完成设备登录即可同步设备并使用出水控制。"
-        !state.hasAppToken -> "尚未完成设备登录" to "使用同一手机号再次短信登录并选择“设备登录”，完成后即可使用设备。"
+        !state.hasAccount -> "尚未登录账号" to "登录账号后，完成用水登录即可同步设备并使用出水控制。"
+        !state.hasAppToken -> "尚未完成用水登录" to "使用同一手机号再次短信登录并选择“用水登录”，完成后即可使用设备。"
         else -> "暂无设备" to "点击右上角加号添加设备。"
     }
-    Surface(shape = RoundedCornerShape(16.dp), color = MaterialTheme.colorScheme.errorContainer) {
+    Surface(shape = WaterShapeTokens.compact, color = MaterialTheme.colorScheme.secondaryContainer) {
         Row(Modifier.padding(13.dp), verticalAlignment = Alignment.CenterVertically) {
-            Icon(Icons.Default.Settings, contentDescription = null, tint = MaterialTheme.colorScheme.onErrorContainer, modifier = Modifier.size(18.dp))
+            Icon(Icons.Default.Settings, contentDescription = null, tint = MaterialTheme.colorScheme.onSecondaryContainer, modifier = Modifier.size(18.dp))
             Column(Modifier.padding(start = 10.dp)) {
-                Text(title, color = MaterialTheme.colorScheme.onErrorContainer, fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
-                Text(detail, color = MaterialTheme.colorScheme.onErrorContainer, fontSize = 12.sp)
+                Text(title, color = MaterialTheme.colorScheme.onSecondaryContainer, fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
+                Text(detail, color = MaterialTheme.colorScheme.onSecondaryContainer, fontSize = 13.sp)
             }
         }
     }
@@ -681,44 +722,54 @@ private fun MineTab(
     themeMode: AppThemeMode,
     onOpenAppearanceSettings: () -> Unit,
     onOpenSettings: () -> Unit,
-    onOpenSupport: () -> Unit
+    onOpenSupport: () -> Unit,
+    autoTaskEnabled: Boolean,
+    onToggleAutoTask: (Boolean) -> Unit,
+    autoUpdateEnabled: Boolean,
+    autoUpdateLabel: String,
+    onToggleAutoUpdate: (Boolean) -> Unit,
+    updateLabel: String,
+    onCheckUpdate: () -> Unit,
+    waterUsageLabel: String,
+    onOpenWaterUsage: () -> Unit
 ) {
-    PersonalUsageSummary(usage = state.usage)
     InfoCard(title = state.accountTitle, subtitle = state.accountSubtitle) {
         StatusRow("账号数量", "${state.accountCount}")
         StatusRow("可用额度", state.scoreTitle)
-        StatusRow("设备登录（必需）", state.appLoginStatusText)
+        StatusRow("用水登录（必需）", state.appLoginStatusText)
         Spacer(Modifier.height(12.dp))
         Row(horizontalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.fillMaxWidth()) {
             Button(onClick = onLogin, modifier = Modifier.weight(1f), shape = RoundedCornerShape(16.dp)) { Text("登录") }
             OutlinedButton(onClick = onAccounts, modifier = Modifier.weight(1f), shape = RoundedCornerShape(16.dp)) { Text("管理账号") }
         }
-        OutlinedButton(onClick = onScores, modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(16.dp)) { Text("查看积分与流水") }
     }
-    SettingsRow(
-        icon = Icons.Default.AccountBalanceWallet,
-        title = "钱包与充值",
-        subtitle = if (state.hasAppToken) "查看余额并充值" else "需要设备登录",
-        onClick = onWallet
-    )
-    SettingsRow(
-        icon = Icons.Default.Palette,
-        title = "外观设置",
-        subtitle = "${themeMode.label} · 小部件透明度与配色",
-        onClick = onOpenAppearanceSettings
-    )
-    SettingsRow(
-        icon = Icons.Default.Settings,
-        title = "任务与更新",
-        subtitle = "每日自动任务 · 检查个人版更新",
-        onClick = onOpenSettings
-    )
-    SettingsRow(
-        icon = Icons.Default.Favorite,
-        title = "支持开发者",
-        subtitle = "喜欢这个应用？到 GitHub 点个 Star",
-        onClick = onOpenSupport
-    )
+    if (state.hasAccount) PersonalUsageSummary(usage = state.usage)
+    SettingsGroup("账户与资金") {
+        SettingsRow(Icons.Default.CheckCircle, "积分与消费记录", "查看积分收支和接水花费", onScores)
+        HorizontalDivider(Modifier.padding(horizontal = 16.dp), color = MaterialTheme.colorScheme.outlineVariant)
+        SettingsRow(Icons.Default.AccountBalanceWallet, "钱包与充值",
+            if (state.hasAppToken) "查看余额、充值与积分兑换" else "需要用水登录", onWallet)
+    }
+    SettingsGroup("自动任务") {
+        SettingsSwitchRow(
+            Icons.Default.CheckCircle, "自动积分任务",
+            if (autoTaskEnabled) "按设定时间自动运行" else "已关闭",
+            autoTaskEnabled, onToggleAutoTask
+        )
+        HorizontalDivider(Modifier.padding(horizontal = 16.dp), color = MaterialTheme.colorScheme.outlineVariant)
+        SettingsSwitchRow(Icons.Default.Refresh, "自动检查更新", autoUpdateLabel, autoUpdateEnabled, onToggleAutoUpdate)
+    }
+    SettingsGroup("应用设置") {
+        SettingsRow(Icons.Default.WaterDrop, "预估水量设置", waterUsageLabel, onOpenWaterUsage)
+        HorizontalDivider(Modifier.padding(horizontal = 16.dp), color = MaterialTheme.colorScheme.outlineVariant)
+        SettingsRow(Icons.Default.Palette, "外观设置", themeMode.label, onOpenAppearanceSettings)
+        HorizontalDivider(Modifier.padding(horizontal = 16.dp), color = MaterialTheme.colorScheme.outlineVariant)
+        SettingsRow(Icons.Default.Refresh, "检查更新", updateLabel, onCheckUpdate)
+        HorizontalDivider(Modifier.padding(horizontal = 16.dp), color = MaterialTheme.colorScheme.outlineVariant)
+        SettingsRow(Icons.Default.Settings, "诊断日志", "开关 · 详细模式 · 导出", onOpenSettings)
+        HorizontalDivider(Modifier.padding(horizontal = 16.dp), color = MaterialTheme.colorScheme.outlineVariant)
+        SettingsRow(Icons.Default.Favorite, "支持开发者", "GitHub · wasdwx/life-798", onOpenSupport)
+    }
     Text(
         text = "WaterWidget  v${BuildConfig.VERSION_NAME}",
         modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
@@ -729,42 +780,53 @@ private fun MineTab(
 
 @Composable
 private fun PersonalUsageSummary(usage: WaterUsageUiState) {
-    // 系统字体放大时三列会挤成竖排单字，改为上下三行。
     val largeText = LocalDensity.current.fontScale >= 1.3f
-    val water = { text: String -> if (usage.showWaterEstimate) text else "" }
     InfoCard(title = "消费统计", subtitle = usage.syncNote) {
         if (largeText) {
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
-                UsageSummaryItem("今日", usage.todayCostText, water(usage.todayWaterText), Modifier.fillMaxWidth())
-                UsageSummaryItem("本月", usage.monthCostText, water(usage.monthWaterText), Modifier.fillMaxWidth())
-                UsageSummaryItem("本年", usage.yearCostText, water(usage.yearWaterText), Modifier.fillMaxWidth())
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                UsageSummaryItem("今日", usage.todayCostText, usage.todayWaterText.takeIf { usage.showWaterEstimate }, Modifier.fillMaxWidth())
+                UsageSummaryItem("本月", usage.monthCostText, usage.monthWaterText.takeIf { usage.showWaterEstimate }, Modifier.fillMaxWidth())
+                UsageSummaryItem("本年", usage.yearCostText, usage.yearWaterText.takeIf { usage.showWaterEstimate }, Modifier.fillMaxWidth())
             }
         } else {
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
-                UsageSummaryItem("今日", usage.todayCostText, water(usage.todayWaterText), Modifier.weight(1f))
-                UsageSummaryItem("本月", usage.monthCostText, water(usage.monthWaterText), Modifier.weight(1f))
-                UsageSummaryItem("本年", usage.yearCostText, water(usage.yearWaterText), Modifier.weight(1f))
+                UsageSummaryItem("今日", usage.todayCostText, usage.todayWaterText.takeIf { usage.showWaterEstimate }, Modifier.weight(1f))
+                UsageSummaryItem("本月", usage.monthCostText, usage.monthWaterText.takeIf { usage.showWaterEstimate }, Modifier.weight(1f))
+                UsageSummaryItem("本年", usage.yearCostText, usage.yearWaterText.takeIf { usage.showWaterEstimate }, Modifier.weight(1f))
             }
+        }
+        if (usage.showWaterEstimate) {
+            Text("水量按统一比例估算，不区分设备", Modifier.padding(top = 8.dp),
+                style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
     }
 }
 
 @Composable
-private fun UsageSummaryItem(label: String, cost: String, water: String, modifier: Modifier = Modifier) {
+private fun UsageSummaryItem(label: String, cost: String, water: String?, modifier: Modifier = Modifier) {
     Surface(modifier = modifier, shape = RoundedCornerShape(16.dp), color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.62f)) {
         Column(Modifier.padding(horizontal = 11.dp, vertical = 12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-            Text(label, color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.78f), fontSize = 11.sp)
+            Text(label, color = MaterialTheme.colorScheme.onPrimaryContainer, fontSize = 12.sp)
             Text(cost, color = MaterialTheme.colorScheme.onPrimaryContainer, fontSize = 18.sp, fontWeight = FontWeight.Bold)
-            if (water.isNotBlank()) {
-                Text(water, color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.76f), fontSize = 11.sp)
-            }
+            if (water != null) Text(water, color = MaterialTheme.colorScheme.onPrimaryContainer, fontSize = 12.sp)
         }
     }
 }
 
 @Composable
-private fun SettingsRow(icon: androidx.compose.ui.graphics.vector.ImageVector, title: String, subtitle: String, onClick: () -> Unit) {
-    Surface(onClick = onClick, shape = RoundedCornerShape(22.dp), color = MaterialTheme.colorScheme.surface, tonalElevation = 0.dp, modifier = Modifier.fillMaxWidth()) {
+private fun SettingsGroup(title: String, content: @Composable ColumnScope.() -> Unit) {
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Text(title, Modifier.padding(start = 4.dp), fontSize = 14.sp,
+            fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Surface(shape = WaterShapeTokens.card, color = MaterialTheme.colorScheme.surface) {
+            Column(content = content)
+        }
+    }
+}
+
+@Composable
+internal fun SettingsRow(icon: androidx.compose.ui.graphics.vector.ImageVector, title: String, subtitle: String, onClick: () -> Unit) {
+    Surface(onClick = onClick, shape = WaterShapeTokens.card, color = MaterialTheme.colorScheme.surface, tonalElevation = 0.dp, modifier = Modifier.fillMaxWidth()) {
         Row(Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
             Box(Modifier.size(40.dp).clip(RoundedCornerShape(13.dp)).background(MaterialTheme.colorScheme.secondaryContainer), contentAlignment = Alignment.Center) {
                 Icon(icon, contentDescription = null, tint = MaterialTheme.colorScheme.onSecondaryContainer)
@@ -778,21 +840,47 @@ private fun SettingsRow(icon: androidx.compose.ui.graphics.vector.ImageVector, t
     }
 }
 
+/** 带开关的设置行：开关本身可点，行其余部分不触发动作。 */
+@Composable
+internal fun SettingsSwitchRow(
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    title: String,
+    subtitle: String,
+    checked: Boolean,
+    onCheckedChange: (Boolean) -> Unit
+) {
+    Surface(shape = WaterShapeTokens.card, color = MaterialTheme.colorScheme.surface, tonalElevation = 0.dp, modifier = Modifier.fillMaxWidth()) {
+        Row(Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
+            Box(Modifier.size(40.dp).clip(RoundedCornerShape(13.dp)).background(MaterialTheme.colorScheme.secondaryContainer), contentAlignment = Alignment.Center) {
+                Icon(icon, contentDescription = null, tint = MaterialTheme.colorScheme.onSecondaryContainer)
+            }
+            Column(Modifier.weight(1f).padding(start = 13.dp)) {
+                Text(title, fontWeight = FontWeight.SemiBold)
+                Text(subtitle, color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 12.sp)
+            }
+            androidx.compose.material3.Switch(checked = checked, onCheckedChange = onCheckedChange)
+        }
+    }
+}
+
 @Composable
 private fun AccountSwitcherDialog(accounts: List<DashboardAccountUiState>, onDismiss: () -> Unit, onSelect: (String) -> Unit) {
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text("切换账号", fontWeight = FontWeight.Bold) },
         text = {
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Column(Modifier.verticalScroll(rememberScrollState()).selectableGroup(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text("选择当前使用的账号", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 13.sp)
                 Spacer(Modifier.height(2.dp))
                 accounts.forEach { account ->
                     Surface(
-                        onClick = { onSelect(account.phone) },
                         shape = RoundedCornerShape(16.dp),
                         color = if (account.isCurrent) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceVariant,
-                        modifier = Modifier.fillMaxWidth()
+                        modifier = Modifier.fillMaxWidth().selectable(
+                            selected = account.isCurrent,
+                            role = Role.RadioButton,
+                            onClick = { onSelect(account.phone) }
+                        )
                     ) {
                         Row(Modifier.padding(13.dp), verticalAlignment = Alignment.CenterVertically) {
                             Box(Modifier.size(32.dp).clip(CircleShape).background(MaterialTheme.colorScheme.surface), contentAlignment = Alignment.Center) {
@@ -800,7 +888,7 @@ private fun AccountSwitcherDialog(accounts: List<DashboardAccountUiState>, onDis
                             }
                             Column(Modifier.weight(1f).padding(start = 10.dp)) {
                                 Text(account.title, fontWeight = FontWeight.SemiBold, fontSize = 15.sp)
-                                Text(account.subtitle, color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 11.sp, maxLines = 1)
+                                Text(account.subtitle, color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 12.sp)
                             }
                             if (account.isCurrent) Icon(Icons.Default.Check, contentDescription = "当前账号", tint = MaterialTheme.colorScheme.primary)
                         }
@@ -808,8 +896,8 @@ private fun AccountSwitcherDialog(accounts: List<DashboardAccountUiState>, onDis
                 }
             }
         },
-        confirmButton = { Text("取消", modifier = Modifier.padding(8.dp).clickable(onClick = onDismiss), color = MaterialTheme.colorScheme.primary) },
-        shape = RoundedCornerShape(28.dp)
+        confirmButton = { TextButton(onClick = onDismiss) { Text("取消") } },
+        shape = WaterShapeTokens.prominent
     )
 }
 
@@ -821,36 +909,45 @@ private fun SupportDeveloperDialog(onDismiss: () -> Unit) {
         icon = { Icon(Icons.Default.Favorite, contentDescription = null, tint = MaterialTheme.colorScheme.tertiary) },
         title = { Text("支持开发者", fontWeight = FontWeight.Bold) },
         text = {
-            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                Text("喜欢这个应用的话，欢迎到 GitHub 点个 Star 支持开发者。", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 13.sp)
-                RepoLink("本改版仓库", "wasdwx/life-798") { runCatching { uriHandler.openUri(it) } }
-                RepoLink("原作者仓库", "nocookies111/life-798") { runCatching { uriHandler.openUri(it) } }
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Text(
+                    "喜欢 WaterWidget 的话，欢迎到 GitHub 点个 Star，或提交问题与建议。",
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    fontSize = 13.sp
+                )
+                SupportLink("本改版仓库（个人版）", AppUpdates.REPOSITORY_URL) {
+                    runCatching { uriHandler.openUri(AppUpdates.REPOSITORY_URL) }
+                }
+                SupportLink("上游原作者仓库", "https://github.com/nocookies111/life-798") {
+                    runCatching { uriHandler.openUri("https://github.com/nocookies111/life-798") }
+                }
             }
         },
-        confirmButton = {
-            OutlinedButton(onClick = onDismiss, shape = RoundedCornerShape(14.dp)) {
-                Text("关闭")
-            }
-        },
-        shape = RoundedCornerShape(28.dp)
+        confirmButton = { TextButton(onClick = onDismiss) { Text("关闭") } },
+        shape = WaterShapeTokens.prominent
     )
 }
 
 @Composable
-private fun RepoLink(label: String, repo: String, onOpen: (String) -> Unit) {
+private fun SupportLink(title: String, url: String, onClick: () -> Unit) {
     Surface(
-        onClick = { onOpen("https://github.com/$repo") },
-        shape = RoundedCornerShape(16.dp),
-        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.68f),
+        onClick = onClick,
+        shape = WaterShapeTokens.compact,
+        color = MaterialTheme.colorScheme.surfaceVariant,
         modifier = Modifier.fillMaxWidth()
     ) {
-        Row(Modifier.padding(13.dp), verticalAlignment = Alignment.CenterVertically) {
-            Icon(Icons.Default.Code, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
-            Column(Modifier.weight(1f).padding(start = 10.dp)) {
-                Text(label, fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
-                Text(repo, color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 12.sp)
+        Row(Modifier.padding(horizontal = 14.dp, vertical = 12.dp), verticalAlignment = Alignment.CenterVertically) {
+            Column(Modifier.weight(1f)) {
+                Text(title, fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
+                Text(url, color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 12.sp,
+                    maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
-            Icon(Icons.AutoMirrored.Filled.OpenInNew, contentDescription = "打开", tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(16.dp))
+            Icon(
+                Icons.AutoMirrored.Filled.ArrowForwardIos,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.size(15.dp)
+            )
         }
     }
 }
@@ -885,7 +982,7 @@ private fun BottomTabs(
         BoxWithConstraints(
             modifier = Modifier
                 .fillMaxWidth()
-                .height(64.dp)
+                .height(68.dp)
         ) {
             val itemWidth = maxWidth / DashboardTab.entries.size
             val indicatorWidth = minOf(itemWidth - 16.dp, 64.dp)
@@ -920,7 +1017,7 @@ private fun BottomTabs(
                 shape = RoundedCornerShape(16.dp),
                 color = colors.secondaryContainer
             ) {}
-            Row(modifier = Modifier.fillMaxSize()) {
+            Row(modifier = Modifier.fillMaxSize().selectableGroup()) {
                 BottomTab(
                     tab = DashboardTab.CONTROL,
                     selected = selectedTab == DashboardTab.CONTROL,
@@ -978,13 +1075,13 @@ private fun RowScope.BottomTab(
         ) {
             Spacer(Modifier.height(5.dp))
             Box(Modifier.height(32.dp), contentAlignment = Alignment.Center) {
-                Icon(icon, contentDescription = tab.label, modifier = Modifier.size(19.dp))
+                Icon(icon, contentDescription = null, modifier = Modifier.size(22.dp))
             }
             Spacer(Modifier.height(2.dp))
             Text(
                 text = tab.label,
-                fontSize = 11.sp,
-                lineHeight = 14.sp,
+                fontSize = 12.sp,
+                lineHeight = 16.sp,
                 fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal
             )
         }
@@ -994,7 +1091,7 @@ private fun RowScope.BottomTab(
 @Composable
 private fun InfoCard(title: String, subtitle: String, content: @Composable ColumnScope.() -> Unit) {
     Card(
-        shape = RoundedCornerShape(26.dp),
+        shape = WaterShapeTokens.card,
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
         elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)
     ) {
@@ -1013,8 +1110,8 @@ private fun InfoCard(title: String, subtitle: String, content: @Composable Colum
 
 @Composable
 private fun StatusRow(label: String, value: String) {
-    Row(Modifier.fillMaxWidth().padding(vertical = 4.dp), horizontalArrangement = Arrangement.SpaceBetween) {
-        Text(label, color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 13.sp)
+    Row(Modifier.fillMaxWidth().padding(vertical = 4.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+        Text(label, Modifier.weight(1f), color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 13.sp)
         Text(value, color = MaterialTheme.colorScheme.onSurface, fontSize = 13.sp, fontWeight = FontWeight.Medium)
     }
 }

@@ -1,29 +1,33 @@
 package com.water.widget.ui
 
+import android.app.Activity
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.asPaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.navigationBars
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.PaddingValues
-import androidx.compose.foundation.layout.WindowInsets
-import androidx.compose.foundation.layout.asPaddingValues
 import androidx.compose.foundation.layout.statusBars
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
-import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -37,8 +41,8 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -47,9 +51,14 @@ import androidx.compose.ui.unit.sp
 private const val INITIAL_LOG_COUNT = 8
 private const val LOG_PAGE_SIZE = 12
 
-/** 账单接口每页固定 20 条，返回满一页就说明可能还有下一页。 */
-private const val BILL_PAGE_SIZE = 20
-
+/**
+ * 积分与消费记录页。
+ *
+ * 界面沿用上游 v5.5.0 的「积分明细 / 接水消费」顶部分栏；
+ * 分页仍用本地实现：接水账单按页从 /bill/lst-owner 拉取，
+ * [ScoreUiState.billPage]、[ScoreUiState.hasMoreBills] 决定是否还有下一页，
+ * 回调按账号下标区分（本地 ScoreActivity 的 loadBillPage/loadMoreBills 都按下标）。
+ */
 @Composable
 fun ScoreDashboardScreen(
     states: List<ScoreUiState>,
@@ -57,13 +66,19 @@ fun ScoreDashboardScreen(
     onRefresh: () -> Unit,
     onLoadBillPayment: (accountIndex: Int, billId: String) -> Unit,
     onLoadMoreBills: (accountIndex: Int) -> Unit = {},
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    onBack: (() -> Unit)? = null
 ) {
-    val totalAvailableScore = states.filter { it.isReady }.sumOf { it.validScore }
-    val readyAccountCount = states.count { it.isReady }
-    var headerHeight by remember { mutableIntStateOf(0) }
-    val indicatorTopOffset = WindowInsets.statusBars.asPaddingValues().calculateTopPadding() +
-        16.dp + with(LocalDensity.current) { headerHeight.toDp() }
+    // ScoreActivity 目前没有传 onBack，这里退回直接结束宿主 Activity，保证返回键可用。
+    val hostActivity = LocalContext.current as? Activity
+    val back: () -> Unit = onBack ?: { hostActivity?.finish() }
+    var showingBills by rememberSaveable { mutableStateOf(false) }
+    val readyStates = states.filter { it.isReady }
+    val totalAvailableScore = readyStates.sumOf { it.validScore }
+    val readyAccountCount = readyStates.size
+    var headerHeightPx by remember { mutableIntStateOf(0) }
+    val headerHeight = with(LocalDensity.current) { headerHeightPx.toDp() }
+    val indicatorTopOffset = WindowInsets.statusBars.asPaddingValues().calculateTopPadding() + 16.dp + headerHeight
 
     Box(modifier = modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
         WaterPullRefresh(
@@ -76,34 +91,49 @@ fun ScoreDashboardScreen(
                 modifier = Modifier
                     .fillMaxSize()
                     .statusBarsPadding()
+                    .navigationBarsPadding()
                     .padding(horizontal = 20.dp),
-                contentPadding = PaddingValues(
-                    top = 16.dp,
-                    // 末项让开系统导航栏，否则列表滚到底也够不出来。
-                    bottom = 16.dp +
-                        WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
-                ),
+                contentPadding = PaddingValues(vertical = 16.dp),
                 verticalArrangement = Arrangement.spacedBy(16.dp)
             ) {
                 item {
-                    Column(Modifier.onSizeChanged { headerHeight = it.height }, verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                        Text(
-                            "积分与消费记录",
-                            fontSize = 26.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = MaterialTheme.colorScheme.onBackground
-                        )
+                    Column(
+                        modifier = Modifier.onSizeChanged { headerHeightPx = it.height },
+                        verticalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            IconButton(onClick = back) {
+                                Icon(
+                                    Icons.AutoMirrored.Rounded.ArrowBack,
+                                    contentDescription = "返回",
+                                    tint = MaterialTheme.colorScheme.onBackground
+                                )
+                            }
+                            Text(
+                                "积分与消费记录",
+                                modifier = Modifier.weight(1f),
+                                fontSize = 22.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = MaterialTheme.colorScheme.onBackground
+                            )
+                        }
                         Text("积分收支与接水花费，分开查看更清楚", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                            FilterChip(selected = !showingBills, onClick = { showingBills = false }, label = { Text("积分明细") })
+                            FilterChip(selected = showingBills, onClick = { showingBills = true }, label = { Text("接水消费") })
+                        }
                     }
                 }
 
-                if (states.isNotEmpty()) {
+                if (states.isNotEmpty() && !showingBills) {
                     item {
                         PullRefreshOffsetContent(pullOffset) {
                             ScoreSummaryCard(
                                 accountCount = states.size,
                                 readyAccountCount = readyAccountCount,
-                                totalAvailableScore = totalAvailableScore
+                                totalAvailableScore = totalAvailableScore,
+                                // 本地没有单独的 scoreLoading 标记：只要有账号还没就绪就按「加载中」处理。
+                                loading = states.any { !it.isReady }
                             )
                         }
                     }
@@ -113,7 +143,7 @@ fun ScoreDashboardScreen(
                     item {
                         PullRefreshOffsetContent(pullOffset) {
                             Card(
-                                shape = RoundedCornerShape(24.dp),
+                                shape = WaterShapeTokens.card,
                                 colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
                                 elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)
                             ) {
@@ -123,7 +153,7 @@ fun ScoreDashboardScreen(
                                 ) {
                                     Text("暂无可查询账号", fontWeight = FontWeight.SemiBold, fontSize = 17.sp)
                                     Text(
-                                        "请先登录账号，完成后即可刷新并查看积分。",
+                                        "请先登录账号，完成后即可查看积分与接水记录。",
                                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                                         fontSize = 13.sp
                                     )
@@ -132,13 +162,14 @@ fun ScoreDashboardScreen(
                         }
                     }
                 } else {
-                    itemsIndexed(states, key = { _, state -> state.accountName }) { index, state ->
+                    // key 里带上下标：本地没有 accountKey，同名的两个账号不能撞 key。
+                    itemsIndexed(states, key = { index, state -> "$index:${state.accountName}" }) { index, state ->
                         PullRefreshOffsetContent(pullOffset) {
-                            ScoreAccountCard(
-                                state = state,
-                                onLoadBillPayment = { billId -> onLoadBillPayment(index, billId) },
-                                onLoadMoreBills = { onLoadMoreBills(index) }
-                            )
+                            if (showingBills) {
+                                WaterBillAccountCard(state, index, onLoadBillPayment, onLoadMoreBills)
+                            } else {
+                                ScoreAccountCard(state)
+                            }
                         }
                     }
                 }
@@ -149,21 +180,30 @@ fun ScoreDashboardScreen(
 }
 
 @Composable
-private fun ScoreSummaryCard(accountCount: Int, readyAccountCount: Int, totalAvailableScore: Int) {
+private fun ScoreSummaryCard(accountCount: Int, readyAccountCount: Int, totalAvailableScore: Int, loading: Boolean) {
     Card(
-        shape = RoundedCornerShape(24.dp),
+        shape = WaterShapeTokens.prominent,
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.secondaryContainer),
         elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)
     ) {
         Column(Modifier.fillMaxWidth().padding(18.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             Text("积分概览", fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.onSecondaryContainer)
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.Bottom) {
-                Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                    Text("可用积分", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSecondaryContainer.copy(alpha = 0.72f))
-                    Text(totalAvailableScore.toString(), fontSize = 30.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSecondaryContainer)
+                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                    Text("已获取可用积分合计", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSecondaryContainer.copy(alpha = 0.72f))
+                    Text(
+                        when {
+                            readyAccountCount > 0 -> totalAvailableScore.toString()
+                            loading -> "加载中…"
+                            else -> "暂不可用"
+                        },
+                        fontSize = if (readyAccountCount > 0) 30.sp else 18.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.onSecondaryContainer
+                    )
                 }
                 Text(
-                    "${readyAccountCount}/${accountCount} 个账号已就绪",
+                    "${readyAccountCount}/${accountCount} 个账号已获取",
                     fontSize = 12.sp,
                     color = MaterialTheme.colorScheme.onSecondaryContainer.copy(alpha = 0.80f)
                 )
@@ -173,15 +213,15 @@ private fun ScoreSummaryCard(accountCount: Int, readyAccountCount: Int, totalAva
 }
 
 @Composable
-private fun ScoreAccountCard(
-    state: ScoreUiState,
-    onLoadBillPayment: (String) -> Unit,
-    onLoadMoreBills: () -> Unit = {}
-) {
-    var showBills by rememberSaveable(state.accountName) { mutableStateOf(false) }
+private fun ScoreAccountCard(state: ScoreUiState) {
+    var visibleLogCount by rememberSaveable(state.accountName, state.logs.size) {
+        mutableIntStateOf(INITIAL_LOG_COUNT)
+    }
+    val visibleLogs = state.logs.take(visibleLogCount)
+    val hasMoreLogs = visibleLogCount < state.logs.size
 
     Card(
-        shape = RoundedCornerShape(26.dp),
+        shape = WaterShapeTokens.card,
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
         elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)
     ) {
@@ -196,8 +236,13 @@ private fun ScoreAccountCard(
                     )
                 }
                 Column(horizontalAlignment = Alignment.End, verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                    Text(state.validScore.toString(), fontSize = 24.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
-                    Text("可用 · ${state.validMoneyText}", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    when {
+                        !state.isReady -> Text("暂不可用", fontSize = 16.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        else -> {
+                            Text(state.validScore.toString(), fontSize = 24.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+                            Text("可用 · ${state.validMoneyText}", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+                    }
                 }
             }
 
@@ -209,69 +254,57 @@ private fun ScoreAccountCard(
                 }
             }
 
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                FilterChip(selected = !showBills, onClick = { showBills = false }, label = { Text("积分明细") })
-                FilterChip(selected = showBills, onClick = { showBills = true }, label = { Text("接水消费") })
-            }
-
-            if (showBills) WaterBillList(state, onLoadBillPayment, onLoadMoreBills) else ScoreLogList(state)
-        }
-    }
-}
-
-@Composable
-private fun ScoreLogList(state: ScoreUiState) {
-    var visibleLogCount by rememberSaveable(state.accountName, state.logs.size) {
-        mutableIntStateOf(INITIAL_LOG_COUNT)
-    }
-    val visibleLogs = state.logs.take(visibleLogCount)
-    val hasMoreLogs = visibleLogCount < state.logs.size
-
-    if (visibleLogs.isNotEmpty()) {
-        Column {
-            visibleLogs.forEachIndexed { index, log ->
-                if (index > 0) HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
-                Row(
-                    Modifier.fillMaxWidth().padding(vertical = 10.dp),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                        Text(log.title, fontSize = 13.sp, fontWeight = FontWeight.Medium)
-                        Text(log.timeText, fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            if (visibleLogs.isNotEmpty()) {
+                Text("最近记录", fontSize = 13.sp, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Column {
+                    visibleLogs.forEachIndexed { index, log ->
+                        if (index > 0) HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
+                        Row(
+                            Modifier.fillMaxWidth().padding(vertical = 10.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                                Text(log.title, fontSize = 13.sp, fontWeight = FontWeight.Medium)
+                                Text(log.timeText, fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            }
+                            Text(
+                                log.scoreText,
+                                fontSize = 15.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = if (log.isIncome) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.tertiary
+                            )
+                        }
                     }
-                    Text(
-                        log.scoreText,
-                        fontSize = 15.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = if (log.isIncome) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.tertiary
-                    )
                 }
+            } else if (state.isReady) {
+                Text(state.message, fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+
+            if (hasMoreLogs) {
+                FilledTonalButton(
+                    onClick = { visibleLogCount = (visibleLogCount + LOG_PAGE_SIZE).coerceAtMost(state.logs.size) },
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = WaterShapeTokens.compact
+                ) {
+                    Text("查看更多记录（剩余 ${state.logs.size - visibleLogCount} 条）")
+                }
+            } else if (state.logs.size > INITIAL_LOG_COUNT) {
+                Text("已展示 ${state.logs.size} 条最近记录", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
         }
-    } else if (state.isReady) {
-        Text("暂时没有积分变动记录", fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-    }
-
-    if (hasMoreLogs) {
-        MoreButton(state.logs.size - visibleLogCount, onClick = {
-            visibleLogCount = (visibleLogCount + LOG_PAGE_SIZE).coerceAtMost(state.logs.size)
-        })
-    } else if (state.logs.size > INITIAL_LOG_COUNT) {
-        Text("已展示 ${state.logs.size} 条最近记录", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
     }
 }
 
 @Composable
-private fun WaterBillList(
+private fun WaterBillAccountCard(
     state: ScoreUiState,
-    onLoadBillPayment: (String) -> Unit,
-    onLoadMoreBills: () -> Unit
+    accountIndex: Int,
+    onLoadBillPayment: (Int, String) -> Unit,
+    onLoadMoreBills: (Int) -> Unit
 ) {
-    var visibleCount by rememberSaveable(state.accountName) {
-        mutableIntStateOf(INITIAL_LOG_COUNT)
-    }
-    // 翻页新到的记录直接展开，否则刚加载完又要再点一次"查看更多"。
+    var visibleCount by rememberSaveable(state.accountName) { mutableIntStateOf(INITIAL_LOG_COUNT) }
+    // 翻页新到的记录直接展开，否则刚加载完又要再点一次「查看更多接水记录」。
     var knownSize by remember(state.accountName) { mutableIntStateOf(state.bills.size) }
     LaunchedEffect(state.bills.size) {
         if (state.bills.size > knownSize) {
@@ -279,98 +312,87 @@ private fun WaterBillList(
             knownSize = state.bills.size
         }
     }
-    Text(
-        if (state.billLoading) "正在加载接水记录…" else state.billMessage,
-        fontSize = 12.sp,
-        color = MaterialTheme.colorScheme.onSurfaceVariant
-    )
-    if (state.bills.isNotEmpty()) {
-        Column {
-            state.bills.take(visibleCount).forEachIndexed { index, bill ->
-                if (index > 0) HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
-                WaterBillRow(bill, onLoad = { onLoadBillPayment(bill.id) })
+    Card(
+        shape = WaterShapeTokens.card,
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)
+    ) {
+        Column(Modifier.fillMaxWidth().padding(18.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Text(state.accountName, fontSize = 18.sp, fontWeight = FontWeight.Bold)
+            Text(state.billMessage, fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            state.bills.take(visibleCount).forEach { bill ->
+                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
+                WaterBillRow(bill, onLoad = { onLoadBillPayment(accountIndex, bill.id) })
+            }
+            if (visibleCount < state.bills.size) {
+                FilledTonalButton(
+                    onClick = { visibleCount = (visibleCount + LOG_PAGE_SIZE).coerceAtMost(state.bills.size) },
+                    modifier = Modifier.fillMaxWidth(), shape = WaterShapeTokens.compact
+                ) { Text("查看更多接水记录") }
+            } else if (state.hasMoreBills || state.billLoading) {
+                // 本地已取到的账单都展示完了，才向后端要下一页（billPage 由 ScoreActivity 维护）。
+                FilledTonalButton(
+                    onClick = { onLoadMoreBills(accountIndex) },
+                    enabled = !state.billLoading,
+                    modifier = Modifier.fillMaxWidth(), shape = WaterShapeTokens.compact
+                ) { Text(if (state.billLoading) "正在加载账单…" else "加载更多账单") }
+            }
+            if (state.bills.isNotEmpty()) {
+                Text("接水记录包含积分与金额支付，不代表完整钱包收支。", fontSize = 12.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
         }
-        if (visibleCount < state.bills.size) {
-            MoreButton(state.bills.size - visibleCount, onClick = {
-                visibleCount = (visibleCount + LOG_PAGE_SIZE).coerceAtMost(state.bills.size)
-            })
-        }
     }
-    // 已取到的都展示完了、服务端还有更多页时，才向后端要下一页。
-    if (visibleCount >= state.bills.size && state.hasMoreBills && !state.billLoading) {
-        MoreButton(BILL_PAGE_SIZE, onLoadMoreBills, "加载更多接水记录")
-    }
-    Text(
-        "接水记录包含积分与金额支付，不代表完整钱包收支。",
-        fontSize = 11.sp,
-        color = MaterialTheme.colorScheme.onSurfaceVariant
-    )
 }
 
 @Composable
 private fun WaterBillRow(bill: WaterBillLogUiState, onLoad: () -> Unit) {
     var expanded by rememberSaveable(bill.id) { mutableStateOf(false) }
-    // 进入可见范围就预取金额，折叠状态下也能直接看到本次花费。
+    // 只按账单 id 触发预取：把 payment/loading/error 也当 key 会在回包后反复重取。
     LaunchedEffect(bill.id) {
         if (bill.payment == null && !bill.loading && bill.error == null) onLoad()
     }
-    val muted = MaterialTheme.colorScheme.onSurfaceVariant
-
-    Column(Modifier.fillMaxWidth().padding(vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                Text(bill.title, fontSize = 13.sp, fontWeight = FontWeight.Medium)
-                Text(bill.timeText, fontSize = 11.sp, color = muted)
+    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.Top) {
+            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                Text(bill.title, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+                Text(bill.timeText, fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
-            val total = bill.payment?.totalText
-            if (total != null) {
-                Text(total, fontSize = 18.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.tertiary)
+            if (bill.payment != null) {
+                Text(bill.payment.totalText, fontSize = 18.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
             } else {
-                Text(if (bill.error != null) "金额暂不可用" else "金额加载中…", fontSize = 12.sp, color = muted)
+                Text(if (bill.error != null) "金额暂不可用" else "金额加载中…", fontSize = 12.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
         }
-        TextButton(
-            onClick = {
-                expanded = !expanded
-                if (expanded && bill.payment == null && !bill.loading) onLoad()
-            },
-            contentPadding = PaddingValues(0.dp)
-        ) {
-            Text(if (expanded) "收起支付明细" else "查看支付明细", fontSize = 12.sp)
-        }
+        TextButton(onClick = {
+            expanded = !expanded
+            // 已经取到金额就不再重复请求。
+            if (expanded && bill.payment == null && !bill.loading) onLoad()
+        }) { Text(if (expanded) "收起支付明细" else "查看支付明细") }
         if (expanded) {
-            val payment = bill.payment
             when {
-                payment != null -> {
-                    if (payment.parts.isEmpty()) {
-                        Text("本笔账单未产生扣费", fontSize = 13.sp, color = muted)
-                    }
-                    payment.parts.forEach { PaymentLine(it.label, it.value, muted) }
-                    PaymentLine("本次总花费", payment.totalText, MaterialTheme.colorScheme.onSurface, bold = true)
+                bill.loading -> Text("正在加载支付明细…", fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                bill.error != null -> {
+                    Text(bill.error, fontSize = 13.sp, color = MaterialTheme.colorScheme.error)
+                    TextButton(onClick = onLoad) { Text("重试") }
                 }
-                bill.error != null -> Text(bill.error, fontSize = 13.sp, color = MaterialTheme.colorScheme.error)
-                else -> Text("正在加载支付明细…", fontSize = 13.sp, color = muted)
+                bill.payment != null -> {
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                        Text("本次总花费", fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+                        Text(bill.payment.totalText, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+                    }
+                    if (bill.payment.parts.isEmpty()) {
+                        Text("本笔账单未产生扣费", fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                    bill.payment.parts.forEach { part ->
+                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                            Text(part.label, Modifier.weight(1f), fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            Text(part.value, fontSize = 13.sp)
+                        }
+                    }
+                }
             }
         }
-    }
-}
-
-@Composable
-private fun PaymentLine(label: String, value: String, labelColor: Color, bold: Boolean = false) {
-    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-        Text(label, fontSize = 13.sp, color = labelColor, modifier = Modifier.weight(1f))
-        Text(value, fontSize = 13.sp, fontWeight = if (bold) FontWeight.SemiBold else FontWeight.Normal)
-    }
-}
-
-@Composable
-private fun MoreButton(
-    remaining: Int,
-    onClick: () -> Unit,
-    label: String = "查看更多记录（剩余 $remaining 条）"
-) {
-    FilledTonalButton(onClick = onClick, modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(14.dp)) {
-        Text(label)
     }
 }

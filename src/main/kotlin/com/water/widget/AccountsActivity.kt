@@ -54,7 +54,8 @@ class AccountsActivity : ComponentActivity() {
                     onRevealToken = { phone, app -> dialog = DialogState.Reveal(phone, app) },
                     onDelete = { phone -> dialog = DialogState.Delete(phone) },
                     onCheckLogin = { phone -> AccountStore.get(this, phone)?.let(::checkLogins) },
-                    onRelogin = { phone, app -> login.launch(LoginActivity.reloginIntent(this, phone, app)) }
+                    onRelogin = { phone, app -> login.launch(LoginActivity.reloginIntent(this, phone, app)) },
+                    onBack = { finish() }
                 )
                 RenderDialog()
             }
@@ -81,7 +82,7 @@ class AccountsActivity : ComponentActivity() {
                     "积分登录（支付宝，可选）" to "",
                     "用水登录（App，必需）" to ""
                 ),
-                sensitive = true,
+                sensitiveFields = setOf(1, 2),
                 onDismiss = { dialog = null },
                 onConfirm = { dialog = null; addByToken(it) }
             )
@@ -91,7 +92,7 @@ class AccountsActivity : ComponentActivity() {
                     title = "手动填写用水登录",
                     message = "用水登录为必需项，用于设备启动、App 端积分任务与钱包充值。",
                     fields = listOf("用水登录（App）" to account?.appToken.orEmpty()),
-                    sensitive = true,
+                    sensitiveFields = setOf(0),
                     onDismiss = { dialog = null },
                     onConfirm = { values ->
                         dialog = null

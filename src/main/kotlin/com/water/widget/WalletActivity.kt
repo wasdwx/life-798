@@ -15,7 +15,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.layout.heightIn
-import androidx.compose.foundation.layout.navigationBars
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBars
@@ -23,7 +23,6 @@ import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material.icons.rounded.AccountBalanceWallet
@@ -32,6 +31,7 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
@@ -44,11 +44,19 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.role
+import androidx.compose.ui.semantics.selected
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextDecoration
@@ -57,9 +65,10 @@ import androidx.compose.ui.unit.sp
 import com.alipay.sdk.app.PayTask
 import com.water.widget.ui.PullRefreshOffsetContent
 import com.water.widget.ui.WaterPullRefresh
+import com.water.widget.ui.WaterShapeTokens
 import com.water.widget.ui.WaterTheme
-import java.security.MessageDigest
 import java.util.Locale
+import java.security.MessageDigest
 
 class WalletActivity : ComponentActivity() {
     private var state by mutableStateOf(WalletUiState())
@@ -90,7 +99,8 @@ class WalletActivity : ComponentActivity() {
     override fun onResume() {
         super.onResume()
         val account = AccountStore.getCurrent(this)
-        if (!hasLoaded || walletAccountKey(account) != lastAccountKey) loadWallets()
+        val accountKey = walletAccountKey(account)
+        if (!hasLoaded || accountKey != lastAccountKey) loadWallets()
     }
 
     override fun onDestroy() {
@@ -131,13 +141,9 @@ class WalletActivity : ComponentActivity() {
             runOnUiThread {
                 if (!canContinue(generation)) return@runOnUiThread
                 // 登录态失效（业务码 -99）时直接提示重新验证，而不是当成普通网络错误。
-                TokenValidity.expiredMessage(response, true)?.let { message ->
-                    state = WalletUiState(
-                        accountName = account.displayName(),
-                        missingAppToken = true,
-                        errorMessage = message,
-                        pendingRechargeOrderId = state.pendingRechargeOrderId
-                    )
+                TokenValidity.expiredMessage(response, true)?.let {
+                    state = WalletUiState(accountName = account.displayName(), missingAppToken = true,
+                        errorMessage = it, pendingRechargeOrderId = state.pendingRechargeOrderId)
                     return@runOnUiThread
                 }
                 if (response == null) {
@@ -188,8 +194,8 @@ class WalletActivity : ComponentActivity() {
             wallet.ownerId == state.selectedOwnerId &&
             state.products.isNotEmpty()
         ) return
-        val appToken = AccountStore.getCurrent(this)?.appToken.orEmpty()
         val generation = ++walletGeneration
+        val appToken = AccountStore.getCurrent(this)?.appToken.orEmpty()
         state = state.copy(
             selectedEndpointId = wallet.endpointId,
             selectedOwnerId = wallet.ownerId,
@@ -203,12 +209,7 @@ class WalletActivity : ComponentActivity() {
         loadProducts(appToken, wallet, generation)
     }
 
-    private fun loadProducts(
-        appToken: String,
-        wallet: RechargeWallet,
-        generation: Int,
-        resultMessage: String? = null
-    ) {
+    private fun loadProducts(appToken: String, wallet: RechargeWallet, generation: Int, resultMessage: String? = null) {
         IlifeApi.rechargeProductsWithToken(appToken, wallet.endpointId) { response, error ->
             runOnUiThread {
                 if (!canContinue(generation)) return@runOnUiThread
@@ -236,9 +237,7 @@ class WalletActivity : ComponentActivity() {
         IlifeApi.accountScoreWithToken(appToken) { response, _ ->
             runOnUiThread {
                 // 账号已切换（token 变了）时丢弃这次回包，避免串号。
-                if (!canContinue() || generation != scoreGeneration ||
-                    AccountStore.getCurrent(this)?.appToken != appToken
-                ) return@runOnUiThread
+                if (!canContinue() || generation != scoreGeneration || AccountStore.getCurrent(this)?.appToken != appToken) return@runOnUiThread
                 val score = try {
                     response?.let(ScoreExchangeParser::availableScore)
                 } catch (_: IllegalArgumentException) {
@@ -269,10 +268,10 @@ class WalletActivity : ComponentActivity() {
             loadWallets("账户已变化，请重新选择兑换钱包")
             return
         }
-        val generation = walletGeneration
         val wallet = state.wallets.firstOrNull {
             it.endpointId == state.selectedEndpointId && it.ownerId == state.selectedOwnerId
         } ?: return
+        val generation = walletGeneration
         state = state.copy(exchangeInProgress = true, exchangeMessage = "正在兑换并更新余额，请稍候…")
         IlifeApi.exchangeScoreWithToken(appToken, wallet.endpointId, score) { response, _ ->
             runOnUiThread {
@@ -401,14 +400,16 @@ class WalletActivity : ComponentActivity() {
             val result = try {
                 AlipayResultParser.parse(PayTask(this).payV2(paymentString, true))
             } catch (e: Exception) {
-                // 支付宝抛异常不代表没付成功，按"结果未知"处理并去服务端核对。
+                // 支付宝抛异常不代表没付成功，按「结果未知」处理并去服务端核对。
                 AlipayResult(AlipayResultKind.PROCESSING, "未能确认支付结果，请查询充值订单")
             }
             runOnUiThread {
                 if (!canContinue(generation)) return@runOnUiThread
                 when (result.kind) {
                     AlipayResultKind.SUCCESS,
-                    AlipayResultKind.PROCESSING -> checkRecharge(appToken, orderId, generation)
+                    AlipayResultKind.PROCESSING -> {
+                        checkRecharge(appToken, orderId, generation)
+                    }
                     AlipayResultKind.CANCELLED -> {
                         state = state.copy(
                             loading = false,
@@ -457,8 +458,7 @@ class WalletActivity : ComponentActivity() {
                         loadWallets("充值订单已付款")
                     }
                     4, 9 -> state = state.copy(
-                        pendingRechargeOrderId = null,
-                        loading = false,
+                        pendingRechargeOrderId = null, loading = false,
                         statusMessage = if (status == 4) "充值订单付款失败" else "充值订单已取消"
                     )
                     else -> state = state.copy(
@@ -537,7 +537,7 @@ internal data class WalletUiState(
     val errorMessage: String? = null
 )
 
-/** 账号指纹：手机号 + 设备 token 的摘要，用于判断"当前页面加载的账号是否还是同一个"。 */
+/** 账号指纹：手机号 + 设备 token 的摘要，用于判断「当前页面加载的账号是否还是同一个」。 */
 private fun walletAccountKey(account: Account?): String {
     val tokenHash = MessageDigest.getInstance("SHA-256")
         .digest(account?.appToken.orEmpty().toByteArray(Charsets.UTF_8))
@@ -565,7 +565,10 @@ internal fun WalletScreen(
     onConfirmExchange: (Int) -> Unit,
     onCheckRecharge: () -> Unit = {}
 ) {
-    val indicatorTopOffset = WindowInsets.statusBars.asPaddingValues().calculateTopPadding() + 72.dp
+    var showingExchange by rememberSaveable { mutableStateOf(false) }
+    var headerHeightPx by remember { mutableIntStateOf(0) }
+    val headerHeight = with(LocalDensity.current) { headerHeightPx.toDp() }
+    val indicatorTopOffset = WindowInsets.statusBars.asPaddingValues().calculateTopPadding() + 12.dp + headerHeight
     Surface(
         modifier = Modifier.fillMaxSize(),
         color = MaterialTheme.colorScheme.background,
@@ -580,23 +583,17 @@ internal fun WalletScreen(
             LazyColumn(
                 modifier = Modifier
                     .fillMaxSize()
-                    .statusBarsPadding(),
-                contentPadding = PaddingValues(
-                    start = 20.dp,
-                    end = 20.dp,
-                    top = 12.dp,
-                    // 末项是「充值」按钮：targetSdk 35 强制 edge-to-edge，
-                    // 底部必须让开系统导航栏，否则按钮被导航栏盖住、点不到。
-                    bottom = 12.dp +
-                        WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
-                ),
+                    .statusBarsPadding()
+                    .navigationBarsPadding(),
+                contentPadding = PaddingValues(horizontal = 20.dp, vertical = 12.dp),
                 verticalArrangement = Arrangement.spacedBy(12.dp)
             ) {
                 item {
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .heightIn(min = 52.dp),
+                            .heightIn(min = 52.dp)
+                            .onSizeChanged { headerHeightPx = it.height },
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         IconButton(onClick = onBack, modifier = Modifier.size(44.dp)) {
@@ -604,7 +601,7 @@ internal fun WalletScreen(
                         }
                         Spacer(Modifier.width(4.dp))
                         Column(verticalArrangement = Arrangement.spacedBy(1.dp)) {
-                            Text("钱包充值", fontSize = 22.sp, fontWeight = FontWeight.Bold)
+                            Text(if (showingExchange) "积分兑换" else "钱包充值", fontSize = 22.sp, fontWeight = FontWeight.Bold)
                             if (state.accountName.isNotBlank()) {
                                 Text(
                                     state.accountName,
@@ -656,7 +653,7 @@ internal fun WalletScreen(
                     item {
                         PullRefreshOffsetContent(pullOffset) {
                             Card(
-                                shape = RoundedCornerShape(20.dp),
+                                shape = WaterShapeTokens.card,
                                 colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
                                 elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)
                             ) {
@@ -664,9 +661,9 @@ internal fun WalletScreen(
                                     modifier = Modifier.padding(20.dp),
                                     verticalArrangement = Arrangement.spacedBy(12.dp)
                                 ) {
-                                    Text("需要设备登录", fontWeight = FontWeight.Bold, fontSize = 18.sp)
+                                    Text("需要用水登录", fontWeight = FontWeight.Bold, fontSize = 18.sp)
                                     Text(
-                                        "钱包与充值使用设备登录信息，请先在账户管理中为当前账号完成设备登录。",
+                                        "钱包与充值使用用水登录信息，请先在账户管理中为当前账号完成用水登录。",
                                         color = MaterialTheme.colorScheme.onSurfaceVariant
                                     )
                                     Button(onClick = onOpenAccounts) { Text("前往账户管理") }
@@ -675,6 +672,27 @@ internal fun WalletScreen(
                         }
                     }
                 } else {
+                    item {
+                        PullRefreshOffsetContent(pullOffset) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(12.dp)
+                            ) {
+                                FilterChip(
+                                    selected = !showingExchange,
+                                    onClick = { showingExchange = false },
+                                    label = { Text("充值") },
+                                    modifier = Modifier.weight(1f)
+                                )
+                                FilterChip(
+                                    selected = showingExchange,
+                                    onClick = { showingExchange = true },
+                                    label = { Text("积分兑换") },
+                                    modifier = Modifier.weight(1f)
+                                )
+                            }
+                        }
+                    }
                     item {
                         PullRefreshOffsetContent(pullOffset) {
                             Text("选择钱包", fontSize = 18.sp, fontWeight = FontWeight.Bold)
@@ -701,12 +719,12 @@ internal fun WalletScreen(
                         }
                     }
 
-                    if (state.selectedEndpointId != null) {
+                    if (showingExchange && state.selectedEndpointId != null) {
                         item {
                             PullRefreshOffsetContent(pullOffset) {
                                 Card(
                                     modifier = Modifier.fillMaxWidth(),
-                                    shape = RoundedCornerShape(20.dp),
+                                    shape = WaterShapeTokens.card,
                                     colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
                                 ) {
                                     Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -721,7 +739,7 @@ internal fun WalletScreen(
                                             it.endpointId == state.selectedEndpointId && it.ownerId == state.selectedOwnerId
                                         }?.let { Text("兑换到：${it.name}") }
                                         ScoreExchangeParser.amounts.forEach { score ->
-                                            Button(
+                                            OutlinedButton(
                                                 onClick = { onRequestExchange(score) },
                                                 enabled = !state.loading && !state.exchangeInProgress && !state.scoreLoading &&
                                                     (state.availableScore ?: 0) >= score,
@@ -742,51 +760,52 @@ internal fun WalletScreen(
                         }
                     }
 
-                    if (state.selectedEndpointId != null) {
-                        item {
-                            PullRefreshOffsetContent(pullOffset) {
-                                Text("选择充值金额", fontSize = 18.sp, fontWeight = FontWeight.Bold)
-                            }
-                        }
-                        if (!state.loading && state.products.isEmpty()) {
+                    if (!showingExchange) {
+                        if (state.selectedEndpointId != null) {
                             item {
                                 PullRefreshOffsetContent(pullOffset) {
-                                    Text("该钱包暂无充值产品", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                    Text("选择充值金额", fontSize = 18.sp, fontWeight = FontWeight.Bold)
+                                }
+                            }
+                            if (!state.loading && state.products.isEmpty()) {
+                                item {
+                                    PullRefreshOffsetContent(pullOffset) {
+                                        Text("该钱包暂无充值产品", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                    }
+                                }
+                            }
+                            items(state.products) { product ->
+                                PullRefreshOffsetContent(pullOffset) {
+                                    ProductCard(
+                                        product = product,
+                                        selected = product.id == state.selectedProductId,
+                                        enabled = !state.loading && !state.exchangeInProgress,
+                                        onClick = { onSelectProduct(product) }
+                                    )
                                 }
                             }
                         }
-                        items(state.products) { product ->
-                            PullRefreshOffsetContent(pullOffset) {
-                                ProductCard(
-                                    product = product,
-                                    selected = product.id == state.selectedProductId,
-                                    enabled = !state.loading && !state.exchangeInProgress,
-                                    onClick = { onSelectProduct(product) }
-                                )
-                            }
-                        }
-                    }
 
-                    val selectedProduct = state.products.firstOrNull { it.id == state.selectedProductId }
-                    item {
-                        PullRefreshOffsetContent(pullOffset) {
-                            Button(
-                                onClick = onRequestRecharge,
-                                enabled = !state.loading && !state.exchangeInProgress && selectedProduct != null &&
-                                    state.pendingRechargeOrderId == null,
-                                modifier = Modifier.fillMaxWidth(),
-                                contentPadding = PaddingValues(vertical = 16.dp)
-                            ) {
-                                if (state.loading) {
-                                    CircularProgressIndicator(
-                                        modifier = Modifier.size(20.dp),
-                                        strokeWidth = 2.dp
-                                    )
-                                } else {
-                                    Text(
-                                        selectedProduct?.let { "充值  ¥${it.price.money()}" }
-                                            ?: "请选择充值金额"
-                                    )
+                        val selectedProduct = state.products.firstOrNull { it.id == state.selectedProductId }
+                        item {
+                            PullRefreshOffsetContent(pullOffset) {
+                                Button(
+                                    onClick = onRequestRecharge,
+                                    enabled = !state.loading && !state.exchangeInProgress && selectedProduct != null && state.pendingRechargeOrderId == null,
+                                    modifier = Modifier.fillMaxWidth(),
+                                    contentPadding = PaddingValues(vertical = 16.dp)
+                                ) {
+                                    if (state.loading) {
+                                        CircularProgressIndicator(
+                                            modifier = Modifier.size(20.dp),
+                                            strokeWidth = 2.dp
+                                        )
+                                    } else {
+                                        Text(
+                                            selectedProduct?.let { "充值  ¥${it.price.money()}" }
+                                                ?: "请选择充值金额"
+                                        )
+                                    }
                                 }
                             }
                         }
@@ -868,11 +887,7 @@ internal fun WalletScreen(
                     }
                 },
                 confirmButton = {
-                    Button(
-                        onClick = onConfirmRecharge,
-                        enabled = !state.loading && !state.exchangeInProgress &&
-                            state.pendingRechargeOrderId == null
-                    ) { Text("确认并前往支付宝") }
+                    Button(onClick = onConfirmRecharge, enabled = !state.loading && !state.exchangeInProgress && state.pendingRechargeOrderId == null) { Text("确认并前往支付宝") }
                 },
                 dismissButton = {
                     TextButton(onClick = onDismissRecharge) { Text("取消") }
@@ -892,8 +907,11 @@ private fun WalletCard(
     Card(
         onClick = onClick,
         enabled = enabled,
-        modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(20.dp),
+        modifier = Modifier.fillMaxWidth().semantics {
+            this.selected = selected
+            role = Role.RadioButton
+        },
+        shape = WaterShapeTokens.card,
         colors = CardDefaults.cardColors(
             containerColor = if (selected) {
                 MaterialTheme.colorScheme.primaryContainer
@@ -912,7 +930,7 @@ private fun WalletCard(
                 Text(wallet.name, fontWeight = FontWeight.SemiBold)
                 Text("余额 ¥${wallet.balance.money()}", color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
-            RadioButton(selected = selected, onClick = null)
+            RadioButton(selected = selected, onClick = null, enabled = enabled)
         }
     }
 }
@@ -927,8 +945,11 @@ private fun ProductCard(
     Card(
         onClick = onClick,
         enabled = enabled,
-        modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(18.dp),
+        modifier = Modifier.fillMaxWidth().semantics {
+            this.selected = selected
+            role = Role.RadioButton
+        },
+        shape = WaterShapeTokens.card,
         colors = CardDefaults.cardColors(
             containerColor = if (selected) {
                 MaterialTheme.colorScheme.secondaryContainer
@@ -941,7 +962,7 @@ private fun ProductCard(
             modifier = Modifier.padding(18.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            RadioButton(selected = selected, onClick = null)
+            RadioButton(selected = selected, onClick = null, enabled = enabled)
             Spacer(Modifier.width(10.dp))
             Column(Modifier.weight(1f)) {
                 Text(product.displayName, fontWeight = FontWeight.SemiBold)
@@ -966,7 +987,7 @@ private fun ProductCard(
 @Composable
 private fun MessageCard(message: String, error: Boolean) {
     Surface(
-        shape = RoundedCornerShape(14.dp),
+        shape = WaterShapeTokens.compact,
         color = if (error) {
             MaterialTheme.colorScheme.errorContainer
         } else {
