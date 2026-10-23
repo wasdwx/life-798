@@ -11,7 +11,7 @@ class LoginUiStateFactoryTest {
         val state = LoginUiStateFactory.from(LoginPlatform.ALIPAY, false, false, "13800000000", "", "")
 
         assertEquals("积分登录", state.platformTitle)
-        assertEquals("补充：完成支付宝端积分任务，获得更多积分", state.platformDescription)
+        assertEquals("可选：领取支付宝积分任务，获得更多积分", state.platformDescription)
         assertEquals("完成积分登录", state.actionLabel)
         assertTrue(state.canLoadCaptcha)
         assertFalse(state.canSendSms)
@@ -22,9 +22,9 @@ class LoginUiStateFactoryTest {
     fun `设备登录标明为必需项`() {
         val state = LoginUiStateFactory.from(LoginPlatform.APP, true, true, "13800000000", "1234", "1234")
 
-        assertEquals("设备登录", state.platformTitle)
-        assertEquals("必需：同步设备、启动出水、钱包充值与 App 端积分任务", state.platformDescription)
-        assertEquals("完成设备登录", state.actionLabel)
+        assertEquals("用水登录", state.platformTitle)
+        assertEquals("接水、钱包和 App 积分任务需要此项登录", state.platformDescription)
+        assertEquals("完成用水登录", state.actionLabel)
         assertTrue(state.canSendSms)
         assertTrue(state.canLogin)
     }

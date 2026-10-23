@@ -418,13 +418,12 @@ public class WaterService extends Service {
     }
 
     private void finishConsumption(Session current, WaterConsumption consumption) {
-        finishWithResult(
-                current,
-                "接水完成",
-                "本次消费 " + consumption.getMoneyText()
-                        + " · 水量约 " + consumption.getEstimatedWaterText(),
-                false
-        );
+        WaterEstimate estimate = WaterUsageSettings.INSTANCE.read(this);
+        String detail = "本次消费 " + consumption.getMoneyText();
+        if (estimate.getVisible()) {
+            detail += " · 水量约 " + estimate.waterText(consumption.getScoreEquivalent());
+        }
+        finishWithResult(current, "接水完成", detail, false);
     }
 
     private void startAsForeground(String text) {

@@ -8,8 +8,8 @@ import kotlin.math.roundToInt
 /**
  * 从积分流水中识别一次饮水消费。
  *
- * 服务端当前没有返回可靠的出水毫升数字，因此水量继续沿用应用统计页的换算规则：
- * 160 积分约等于 500 ml。
+ * 服务端当前没有返回可靠的出水毫升数字，因此水量按 WaterEstimate 的统一比例估算，
+ * 默认 160 积分约等于 500 ml（与旧硬编码公式输出一致）。
  */
 data class WaterConsumption(
     val spentScore: Int,
@@ -27,16 +27,9 @@ data class WaterConsumption(
     val moneyText: String
         get() = "¥${String.format(Locale.CHINA, "%.2f", paymentYuan ?: spentScore / 1000.0)}"
 
+    /** 按统一比例（默认 160 积分 ≈ 500 ml）估算的水量文本；需要自定义比例时调用 WaterEstimate.waterText。 */
     val estimatedWaterText: String
-        get() {
-            val millilitres = scoreEquivalent * 500 / 160
-            return if (millilitres >= 1000) {
-                String.format(Locale.CHINA, "%.1f L", millilitres / 1000.0)
-            } else {
-                val roundedMillilitres = (millilitres + 5) / 10 * 10
-                "$roundedMillilitres ml"
-            }
-        }
+        get() = WaterEstimate().waterText(scoreEquivalent)
 }
 
 object WaterBillParser {

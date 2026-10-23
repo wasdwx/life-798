@@ -48,6 +48,7 @@ import androidx.core.app.NotificationManagerCompat
 import androidx.core.content.FileProvider
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.water.widget.ui.SectionCard
+import com.water.widget.ui.WaterUsageSettingsCard
 import com.water.widget.ui.WaterTheme
 import java.time.format.DateTimeFormatter
 import java.time.ZonedDateTime
@@ -146,6 +147,7 @@ class AppSettingsActivity : ComponentActivity() {
                                 color = MaterialTheme.colorScheme.onSurfaceVariant)
                         }
                     }
+                    WaterUsageSettingsCard()
                     SectionCard("检查更新") {
                         Text(buildAnnotatedString {
                             append("github仓库：")

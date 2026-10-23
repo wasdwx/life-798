@@ -106,6 +106,14 @@ public class AccountStore {
         }
     }
 
+    /** 登录后补全 uid；与上游 v5.5.0 的调用约定保持一致。 */
+    public static synchronized void updateUid(Context ctx, String phone, String expectedToken, String uid) {
+        update(ctx, phone, target -> {
+            if (expectedToken != null && !expectedToken.equals(target.token) && !expectedToken.equals(target.appToken)) return;
+            target.uid = uid;
+        });
+    }
+
     /** Mutate metadata under the same lock as login writes; never save a stale account snapshot. */
     public static synchronized void update(Context ctx, String phone, java.util.function.Consumer<Account> change) {
         Account latest = get(ctx, phone);

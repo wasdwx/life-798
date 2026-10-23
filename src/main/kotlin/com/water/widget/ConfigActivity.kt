@@ -52,6 +52,8 @@ class ConfigActivity : ComponentActivity() {
     private var deviceGeneration = 0
     /** 账单补齐进行中；onResume 很频繁，避免同时跑多轮。 */
     private var billSyncRunning = false
+    /** 首次运行任务前必须确认风险提示；由 runTasksInHome 置位，Compose 侧弹窗。 */
+    private var riskDialogPending by mutableStateOf(false)
     private var destroyed = false
     /** 外观设置页可能改了显示模式，回到前台时对不上就重建 */
     private var appliedMode: AppThemeMode? = null
@@ -104,6 +106,15 @@ class ConfigActivity : ComponentActivity() {
                         if (!WaterService.stop(this, deviceId)) toast("当前设备不在可停止的会话中")
                     }
                 )
+                if (riskDialogPending) {
+                    com.water.widget.ui.TaskRiskDialog(
+                        onConfirm = {
+                            TaskRiskConsent.confirm(this)
+                            riskDialogPending = false
+                            runWithNotificationPermission(::runTasksInHome)
+                        }
+                    )
+                }
                 val update by updates.state.collectAsStateWithLifecycle()
                 var dismissedTag by rememberSaveable { mutableStateOf<String?>(null) }
                 update.available?.takeIf { it.tag != dismissedTag }?.let { release ->
@@ -181,6 +192,10 @@ class ConfigActivity : ComponentActivity() {
             }
             TaskForegroundService.StartResult.NO_ACCOUNTS -> {
                 toast("没有可运行账号，请先完成设备或积分登录")
+                false
+            }
+            TaskForegroundService.StartResult.RISK_NOT_CONFIRMED -> {
+                riskDialogPending = true
                 false
             }
             TaskForegroundService.StartResult.FAILED -> {

@@ -1001,6 +1001,7 @@ class TaskForegroundService : Service() {
         STARTED,
         ALREADY_RUNNING,
         NO_ACCOUNTS,
+        RISK_NOT_CONFIRMED,
         FAILED
     }
 
@@ -1025,6 +1026,8 @@ class TaskForegroundService : Service() {
 
         fun start(context: Context): StartResult {
             if (TaskRunRepository.state.value.running) return StartResult.ALREADY_RUNNING
+            // 首次使用必须先阅读并确认风险提示与免责声明，确认前不允许启动任务。
+            if (!TaskRiskConsent.isConfirmed(context)) return StartResult.RISK_NOT_CONFIRMED
             if (AccountStore.list(context).none { it.hasToken() || it.hasAppToken() }) return StartResult.NO_ACCOUNTS
             return try {
                 androidx.core.content.ContextCompat.startForegroundService(

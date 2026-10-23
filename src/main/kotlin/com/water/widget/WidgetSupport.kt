@@ -163,6 +163,7 @@ object WidgetSupport {
                 "正在停止…"
             }
             TaskForegroundService.StartResult.NO_ACCOUNTS -> "无可用账户"
+            TaskForegroundService.StartResult.RISK_NOT_CONFIRMED -> "请先在应用内确认积分任务风险提示"
             TaskForegroundService.StartResult.FAILED -> "启动失败，请重试"
         }
 

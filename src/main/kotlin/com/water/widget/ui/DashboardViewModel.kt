@@ -42,6 +42,8 @@ class DashboardViewModel(application: Application) : AndroidViewModel(applicatio
             }
         }
         viewModelScope.launch { WaterControl.state.collect { publish() } }
+        // 用水量估算比例/开关变化后，首页立即按新比例重算，不必等下一次刷新。
+        viewModelScope.launch { com.water.widget.WaterUsageSettings.changes.collect { publish() } }
     }
 
     fun reloadAccounts(resetScore: Boolean = false) {

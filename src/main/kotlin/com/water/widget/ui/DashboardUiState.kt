@@ -1,6 +1,7 @@
 package com.water.widget.ui
 
 import com.water.widget.Account
+import com.water.widget.WaterEstimate
 import org.json.JSONObject
 import java.util.Calendar
 import java.util.Locale
@@ -30,7 +31,8 @@ data class WaterUsageUiState(
     val yearCostText: String = "--",
     val todayWaterText: String = "--",
     val monthWaterText: String = "--",
-    val yearWaterText: String = "--"
+    val yearWaterText: String = "--",
+    val showWaterEstimate: Boolean = true
 )
 
 data class DashboardAccountUiState(
@@ -49,7 +51,8 @@ object DashboardUiStateFactory {
         validScore: Int? = null,
         scoreJson: JSONObject? = null,
         usageOverride: WaterUsageUiState? = null,
-        walletBalance: Double? = null
+        walletBalance: Double? = null,
+        waterEstimate: WaterEstimate = WaterEstimate()
     ): DashboardSummaryUiState {
         if (account == null) {
             return DashboardSummaryUiState(
@@ -62,7 +65,7 @@ object DashboardUiStateFactory {
                 hasDevices = false,
                 accountCount = accountCount,
                 devices = emptyList(),
-                usage = WaterUsageUiState()
+                usage = WaterUsageUiState(showWaterEstimate = waterEstimate.visible)
             )
         }
 
@@ -97,13 +100,19 @@ object DashboardUiStateFactory {
                     isControlCenterDevice = id == account.selectedDeviceId()
                 )
             },
-            usage = usageOverride ?: usageFrom(scoreJson)
+            usage = usageOverride ?: usageFrom(scoreJson, waterEstimate)
         )
     }
 
-    private fun usageFrom(scoreJson: JSONObject?): WaterUsageUiState {
-        if (scoreJson == null || scoreJson.optInt("code", -999) != 0) return WaterUsageUiState()
-        val records = scoreJson.optJSONArray("data") ?: return WaterUsageUiState()
+    private fun usageFrom(
+        scoreJson: JSONObject?,
+        estimate: WaterEstimate = WaterEstimate()
+    ): WaterUsageUiState {
+        if (scoreJson == null || scoreJson.optInt("code", -999) != 0) {
+            return WaterUsageUiState(showWaterEstimate = estimate.visible)
+        }
+        val records = scoreJson.optJSONArray("data")
+            ?: return WaterUsageUiState(showWaterEstimate = estimate.visible)
         val now = Calendar.getInstance()
         val today = Calendar.getInstance().apply {
             set(Calendar.HOUR_OF_DAY, 0)
@@ -132,9 +141,10 @@ object DashboardUiStateFactory {
             todayCostText = moneyText(todaySpend),
             monthCostText = moneyText(monthSpend),
             yearCostText = moneyText(yearSpend),
-            todayWaterText = waterText(todaySpend),
-            monthWaterText = waterText(monthSpend),
-            yearWaterText = waterText(yearSpend)
+            todayWaterText = estimate.waterText(todaySpend),
+            monthWaterText = estimate.waterText(monthSpend),
+            yearWaterText = estimate.waterText(yearSpend),
+            showWaterEstimate = estimate.visible
         )
     }
 
@@ -150,14 +160,6 @@ object DashboardUiStateFactory {
     }
 
     private fun moneyText(score: Int): String = "¥${String.format(Locale.CHINA, "%.2f", score / 1000.0)}"
-
-    private fun waterText(score: Int): String {
-        val millilitres = score * 500 / 160
-        return when {
-            millilitres >= 1000 -> String.format(Locale.CHINA, "%.1f L", millilitres / 1000.0)
-            else -> "${(millilitres + 5) / 10 * 10} ml"
-        }
-    }
 
     fun accountsFrom(accounts: List<Account>, currentPhone: String?): List<DashboardAccountUiState> =
         accounts.map { account ->

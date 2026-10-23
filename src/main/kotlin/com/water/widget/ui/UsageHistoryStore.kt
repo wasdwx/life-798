@@ -2,6 +2,8 @@ package com.water.widget.ui
 
 import android.content.Context
 import com.water.widget.WaterConsumption
+import com.water.widget.WaterEstimate
+import com.water.widget.WaterUsageSettings
 import org.json.JSONArray
 import org.json.JSONObject
 import java.security.MessageDigest
@@ -21,8 +23,9 @@ object UsageHistoryStore {
     private const val PREFS = "usage_history_v1"
 
     fun mergeAndRead(context: Context, accountKey: String, scoreJson: JSONObject?): WaterUsageUiState {
-        if (accountKey.isBlank()) return WaterUsageUiState()
-        return edit(context, accountKey) { it.merge(scoreJson) }.toUiState()
+        val estimate = WaterUsageSettings.read(context)
+        if (accountKey.isBlank()) return WaterUsageUiState(showWaterEstimate = estimate.visible)
+        return edit(context, accountKey) { it.merge(scoreJson) }.toUiState(estimate = estimate)
     }
 
     fun record(context: Context, accountKey: String, consumption: WaterConsumption) {
@@ -160,8 +163,11 @@ internal class UsageHistoryLedger(
         return true
     }
 
-    fun toUiState(now: Calendar = Calendar.getInstance()): WaterUsageUiState {
-        if (dayTotals.isEmpty()) return WaterUsageUiState()
+    fun toUiState(
+        now: Calendar = Calendar.getInstance(),
+        estimate: WaterEstimate = WaterEstimate()
+    ): WaterUsageUiState {
+        if (dayTotals.isEmpty()) return WaterUsageUiState(showWaterEstimate = estimate.visible)
         val todayKey = dayKey(now.timeInMillis)
         val monthPrefix = "%04d-%02d".format(
             Locale.ROOT,
@@ -176,9 +182,10 @@ internal class UsageHistoryLedger(
             todayCostText = moneyText(today),
             monthCostText = moneyText(month),
             yearCostText = moneyText(year),
-            todayWaterText = waterText(today),
-            monthWaterText = waterText(month),
-            yearWaterText = waterText(year)
+            todayWaterText = estimate.waterText(today),
+            monthWaterText = estimate.waterText(month),
+            yearWaterText = estimate.waterText(year),
+            showWaterEstimate = estimate.visible
         )
     }
 
@@ -288,15 +295,5 @@ internal class UsageHistoryLedger(
         }
 
         private fun moneyText(score: Int): String = "¥${String.format(Locale.CHINA, "%.2f", score / 1000.0)}"
-
-        private fun waterText(score: Int): String {
-            val millilitres = score * 500 / 160
-            return if (millilitres >= 1000) {
-                String.format(Locale.CHINA, "%.1f L", millilitres / 1000.0)
-            } else {
-                val roundedMillilitres = (millilitres + 5) / 10 * 10
-                "$roundedMillilitres ml"
-            }
-        }
     }
 }

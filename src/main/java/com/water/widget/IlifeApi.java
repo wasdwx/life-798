@@ -103,13 +103,32 @@ public class IlifeApi {
 
     public static void sendSms(final String phone, final String graphCode, final String s,
                                final JsonCallback cb) {
+        sendSms(phone, graphCode, s, false, cb);
+    }
+
+    /**
+     * 发送短信验证码。
+     * 身份必须与随后的登录请求一致：App 端（1,1）用 3.1.9，小程序端（1,5）用 2.0.83，
+     * 否则服务端会把两个身份的验证码会话当成不同的客户端。
+     */
+    public static void sendSms(final String phone, final String graphCode, final String s,
+                               final boolean asApp, final JsonCallback cb) {
         JSONObject body = new JSONObject();
         try {
             body.put("un", phone);
             body.put("authCode", graphCode);
             body.put("s", s);
         } catch (Exception ignored) {}
-        post("/acc/login/code", body, null, cb);
+        final String appType = asApp ? "1,1" : "1,5";
+        new Thread(() -> {
+            try {
+                String resp = httpRawApp("POST", GATEWAY + "/acc/login/code",
+                        body.toString(), null, appType);
+                cb.onResult(new JSONObject(resp), null);
+            } catch (Exception e) {
+                cb.onResult(null, e.getMessage());
+            }
+        }).start();
     }
 
     public static void login(final String phone, final String smsCode, final JsonCallback cb) {

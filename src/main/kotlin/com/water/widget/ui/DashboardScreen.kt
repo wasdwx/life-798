@@ -394,13 +394,15 @@ private fun TodayOverviewCard(usage: WaterUsageUiState) {
                 content = MaterialTheme.colorScheme.onPrimaryContainer,
                 modifier = Modifier.weight(1f)
             )
-            UsageMetric(
-                label = "今日估算水量",
-                value = usage.todayWaterText,
-                accent = MaterialTheme.colorScheme.secondaryContainer,
-                content = MaterialTheme.colorScheme.onSecondaryContainer,
-                modifier = Modifier.weight(1f)
-            )
+            if (usage.showWaterEstimate) {
+                UsageMetric(
+                    label = "今日估算水量",
+                    value = usage.todayWaterText,
+                    accent = MaterialTheme.colorScheme.secondaryContainer,
+                    content = MaterialTheme.colorScheme.onSecondaryContainer,
+                    modifier = Modifier.weight(1f)
+                )
+            }
         }
     }
 }
@@ -728,9 +730,10 @@ private fun MineTab(
 private fun PersonalUsageSummary(usage: WaterUsageUiState) {
     InfoCard(title = "消费统计", subtitle = "") {
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
-            UsageSummaryItem("今日", usage.todayCostText, usage.todayWaterText, Modifier.weight(1f))
-            UsageSummaryItem("本月", usage.monthCostText, usage.monthWaterText, Modifier.weight(1f))
-            UsageSummaryItem("本年", usage.yearCostText, usage.yearWaterText, Modifier.weight(1f))
+            val water = { text: String -> if (usage.showWaterEstimate) text else "" }
+            UsageSummaryItem("今日", usage.todayCostText, water(usage.todayWaterText), Modifier.weight(1f))
+            UsageSummaryItem("本月", usage.monthCostText, water(usage.monthWaterText), Modifier.weight(1f))
+            UsageSummaryItem("本年", usage.yearCostText, water(usage.yearWaterText), Modifier.weight(1f))
         }
     }
 }
@@ -741,7 +744,9 @@ private fun UsageSummaryItem(label: String, cost: String, water: String, modifie
         Column(Modifier.padding(horizontal = 11.dp, vertical = 12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
             Text(label, color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.78f), fontSize = 11.sp)
             Text(cost, color = MaterialTheme.colorScheme.onPrimaryContainer, fontSize = 18.sp, fontWeight = FontWeight.Bold)
-            Text(water, color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.76f), fontSize = 11.sp)
+            if (water.isNotBlank()) {
+                Text(water, color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.76f), fontSize = 11.sp)
+            }
         }
     }
 }

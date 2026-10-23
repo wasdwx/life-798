@@ -30,7 +30,19 @@ class LoginActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         UI.applySystemBarAppearance(this, ThemeSettings.isDark(this))
+        phone = intent.getStringExtra(EXTRA_PHONE).orEmpty()
+        platform = if (intent.getBooleanExtra(EXTRA_APP, true)) LoginPlatform.APP else LoginPlatform.ALIPAY
         render()
+    }
+
+    companion object {
+        private const val EXTRA_PHONE = "login_phone"
+        private const val EXTRA_APP = "login_app"
+
+        fun reloginIntent(context: android.content.Context, phone: String, app: Boolean) =
+            android.content.Intent(context, LoginActivity::class.java)
+                .putExtra(EXTRA_PHONE, phone)
+                .putExtra(EXTRA_APP, app)
     }
 
     private fun render() {
@@ -49,7 +61,8 @@ class LoginActivity : ComponentActivity() {
                     onSmsCodeChange = { smsCode = it.trim(); render() },
                     onLoadCaptcha = { loadCaptcha() },
                     onSendSms = { sendSms() },
-                    onLogin = { doLogin() }
+                    onLogin = { doLogin() },
+                    onBack = { finish() }
                 )
             }
         }
@@ -92,7 +105,7 @@ class LoginActivity : ComponentActivity() {
             return
         }
         setLoading(true)
-        IlifeApi.sendSms(phone, graphCode, captchaKey) { json, err ->
+        IlifeApi.sendSms(phone, graphCode, captchaKey, platform == LoginPlatform.APP) { json, err ->
             runOnUiThread {
                 setLoading(false)
                 if (json == null) {
@@ -118,19 +131,21 @@ class LoginActivity : ComponentActivity() {
             return
         }
         setLoading(true)
-        IlifeApi.login(phone, smsCode, platform == LoginPlatform.APP) { json, err ->
+        val requestPhone = phone
+        val requestPlatform = platform
+        IlifeApi.login(requestPhone, smsCode, requestPlatform == LoginPlatform.APP) { json, err ->
             runOnUiThread {
                 setLoading(false)
                 if (json == null) {
                     toast("登录出错: ${err ?: "未知错误"}")
                     return@runOnUiThread
                 }
-                handleLoginResult(json)
+                handleLoginResult(json, requestPhone, requestPlatform)
             }
         }
     }
 
-    private fun handleLoginResult(json: JSONObject) {
+    private fun handleLoginResult(json: JSONObject, requestPhone: String, requestPlatform: LoginPlatform) {
         val code = json.optInt("code", -999)
         if (code != 0) {
             toast("登录失败: ${json.optString("msg", "code=$code")}")
@@ -144,17 +159,17 @@ class LoginActivity : ComponentActivity() {
         }
         val loginData = al ?: return
 
-        val existing = AccountStore.get(this, phone)
-        val account = existing ?: Account(phone)
-        if (platform == LoginPlatform.APP) account.appToken = newToken else account.token = newToken
+        val existing = AccountStore.get(this, requestPhone)
+        val account = existing ?: Account(requestPhone)
+        if (requestPlatform == LoginPlatform.APP) account.appToken = newToken else account.token = newToken
         if (TextUtils.isEmpty(account.uid)) account.uid = loginData.optString("uid")
         if (TextUtils.isEmpty(account.eid)) account.eid = loginData.optString("eid")
         AccountStore.addOrUpdate(this, account)
-        fetchUidAsync(phone, newToken)
+        fetchUidAsync(requestPhone, newToken)
         toast(
             if (account.hasToken() && account.hasAppToken()) {
                 "设备与积分登录均已完成"
-            } else if (platform == LoginPlatform.APP) {
+            } else if (requestPlatform == LoginPlatform.APP) {
                 "设备登录已完成；现在可使用设备，补充积分登录可获得更多积分"
             } else {
                 "积分登录已完成；请先用同一手机号完成设备登录以使用设备"
@@ -170,9 +185,7 @@ class LoginActivity : ComponentActivity() {
                 val data = json.optJSONObject("data")
                 val id = data?.optString("id") ?: ""
                 if (id.isNotBlank()) {
-                    AccountStore.update(this, targetPhone) { target ->
-                        if (target.token == token || target.appToken == token) target.uid = id
-                    }
+                    runOnUiThread { AccountStore.updateUid(this, targetPhone, token, id) }
                 }
             }
         }

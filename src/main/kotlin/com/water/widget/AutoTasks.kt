@@ -107,6 +107,7 @@ class AutoTaskReceiver : BroadcastReceiver() {
         val message = when (TaskForegroundService.start(context)) {
             TaskForegroundService.StartResult.STARTED, TaskForegroundService.StartResult.ALREADY_RUNNING -> return
             TaskForegroundService.StartResult.NO_ACCOUNTS -> "请先完成设备或积分登录"
+            TaskForegroundService.StartResult.RISK_NOT_CONFIRMED -> "请先进入积分任务页，阅读风险提示并确认"
             TaskForegroundService.StartResult.FAILED -> "系统未允许后台启动，请打开应用运行任务"
         }
         AppNotifications.ensureChannels(context)
