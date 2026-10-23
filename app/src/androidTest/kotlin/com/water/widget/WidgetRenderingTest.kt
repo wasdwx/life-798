@@ -28,6 +28,8 @@ class WidgetRenderingTest {
         deviceName = "宿舍楼三层走廊饮水机",
         deviceStatus = "待机",
         deviceCompact = "启动设备",
+        deviceAction = "启动设备",
+        deviceActionShort = "启动",
         taskStatus = "12,345 · 本次 +1,200",
         taskCompact = "积分 12,345 · +1,200",
         taskDetail = "本次任务已完成",

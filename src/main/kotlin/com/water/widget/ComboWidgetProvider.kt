@@ -31,7 +31,7 @@ class ComboWidgetProvider : AppWidgetProvider() {
         val (deviceOverride, taskOverride) = when (intent.action) {
             // 服务是异步拉起的，点击瞬间还读不到运行状态，先用返回值顶上，
             // 随后服务自己广播的刷新会覆盖掉它。
-            ACTION_START_DEVICE -> WidgetSupport.startDevice(context) to null
+            ACTION_TOGGLE_DEVICE, LEGACY_ACTION_START_DEVICE -> WidgetSupport.toggleDevice(context) to null
             ACTION_RUN_TASKS -> null to WidgetSupport.toggleTasks(context)
             else -> return
         }
@@ -83,9 +83,10 @@ class ComboWidgetProvider : AppWidgetProvider() {
             setViewVisibility(R.id.combo_header, if (showHeader) View.VISIBLE else View.GONE)
             setTextViewText(R.id.combo_device_name, info.deviceName)
             setTextViewText(R.id.combo_usage_text, info.usageText)
+            setTextViewText(R.id.combo_title_device, info.deviceAction)
             val deviceStatus = when {
-                shortActions && info.deviceCompact == "启动设备" -> "启动"
-                !showTitles -> info.deviceCompact
+                shortActions -> info.deviceActionShort
+                !showTitles -> info.deviceAction
                 !showHeader && info.deviceStatus == "待机" -> info.deviceName
                 else -> info.deviceStatus
             }
@@ -106,7 +107,7 @@ class ComboWidgetProvider : AppWidgetProvider() {
             }
             val px = (padding * context.resources.displayMetrics.density).toInt()
             setViewPadding(android.R.id.background, px, px, px, px)
-            setContentDescription(R.id.combo_btn_device, "启动设备，${info.deviceName}，${deviceOverride ?: info.deviceStatus}，${info.usageText}")
+            setContentDescription(R.id.combo_btn_device, "${info.deviceAction}，${info.deviceName}，${deviceOverride ?: info.deviceStatus}，${info.usageText}")
             setContentDescription(R.id.combo_btn_task, "积分任务，${taskOverride ?: info.taskStatus}，${info.taskDetail}")
             bindClicksAndColors(context)
         }
@@ -123,7 +124,7 @@ class ComboWidgetProvider : AppWidgetProvider() {
             WidgetSupport.actionIntent(
                 context,
                 ComboWidgetProvider::class.java,
-                ACTION_START_DEVICE,
+                ACTION_TOGGLE_DEVICE,
                 REQ_START_DEVICE
             )
         )
@@ -149,7 +150,10 @@ class ComboWidgetProvider : AppWidgetProvider() {
     }
 
     companion object {
-        const val ACTION_START_DEVICE = "com.water.widget.combo.START_DEVICE"
+        const val ACTION_TOGGLE_DEVICE = "com.water.widget.combo.TOGGLE_DEVICE"
+
+        /** 旧版本留在启动器里的点击动作，升级后仍可能被触发，继续接住。 */
+        private const val LEGACY_ACTION_START_DEVICE = "com.water.widget.combo.START_DEVICE"
         const val ACTION_RUN_TASKS = "com.water.widget.combo.RUN_TASKS"
         private const val REQ_START_DEVICE = 2001
         private const val REQ_RUN_TASKS = 2002

@@ -145,6 +145,16 @@ object DiagLog {
 
     private class Entry(val level: DiagLevel, val at: Long, val text: String)
 
+    /**
+     * 同一个模板在短时间内反复出现时（例如整批重试连续 4 次同样的网络失败），
+     * 只写第一行，收尾补一行「重复 N 次」。窗口 60 秒：跨窗口的重复仍会各写一次，
+     * 便于看出「凌晨这次失败」和「中午那次」是不是同一类。
+     */
+    private const val DEDUPE_WINDOW_MS = 60_000L
+    private var lastText: String? = null
+    private var lastAt = 0L
+    private var repeatCount = 0
+
     private val queue = ArrayBlockingQueue<Entry>(QUEUE_CAPACITY)
     private val timeFormat = SimpleDateFormat("MM-dd HH:mm:ss.SSS", Locale.US)
     private val dropped = AtomicLong()
@@ -247,7 +257,10 @@ object DiagLog {
             log(level, "   resp: " + AuthRedactor.summarize(responseBody))
         }
         if (verbose) {
-            log(DiagLevel.DEBUG, "   req : " + AuthRedactor.summarize(requestBody))
+            // GET 请求没有请求体，过去会写一行「req : (empty)」，占整份日志的四分之一
+            if (!requestBody.isNullOrBlank()) {
+                log(DiagLevel.DEBUG, "   req : " + AuthRedactor.summarize(requestBody))
+            }
             if (level == DiagLevel.INFO) log(DiagLevel.DEBUG, "   resp: " + AuthRedactor.summarize(responseBody))
         }
     }
@@ -288,6 +301,29 @@ object DiagLog {
 
     @Synchronized
     private fun writeNow(entry: Entry) {
+        if (entry.text == lastText && entry.at - lastAt <= DEDUPE_WINDOW_MS) {
+            repeatCount++
+            lastAt = entry.at
+            return
+        }
+        flushRepeats(entry.at)
+        emit(entry)
+        lastText = entry.text
+        lastAt = entry.at
+    }
+
+    /** 把之前折叠掉的重复次数补成一行，跟在最后一条真实日志后面。 */
+    private fun flushRepeats(at: Long) {
+        if (repeatCount <= 0) return
+        val text = "   ^ 上一条重复 " + repeatCount + " 次"
+        repeatCount = 0
+        try { Log.println(priority(DiagLevel.INFO), TAG, text) } catch (_: Throwable) {}
+        val bytes = (timeFormat.format(Date(at)) + " " + letter(DiagLevel.INFO) + "| " + text + "\n")
+            .toByteArray(Charsets.UTF_8)
+        try { rotating?.append(bytes) } catch (_: Throwable) {}
+    }
+
+    private fun emit(entry: Entry) {
         val line = timeFormat.format(Date(entry.at)) + " " + letter(entry.level) + "| " + entry.text + "\n"
         try { Log.println(priority(entry.level), TAG, entry.text) } catch (_: Throwable) {}
         val bytes = line.toByteArray(Charsets.UTF_8)
@@ -308,6 +344,11 @@ object DiagLog {
     fun clear() {
         try { rotating?.clear() } catch (_: Throwable) {}
         try { errorLog?.clear() } catch (_: Throwable) {}
+        synchronized(this) {
+            lastText = null
+            lastAt = 0L
+            repeatCount = 0
+        }
     }
 
     /** 导出为 zip（放 cacheDir/diag/，供 FileProvider 分享）。 */

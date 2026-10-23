@@ -34,6 +34,10 @@ object WidgetSupport {
         val deviceName: String,
         val deviceStatus: String,
         val deviceCompact: String,
+        /** 设备按钮当前的动作名：「启动设备」或会话阶段名（RUNNING 阶段即「停止设备」）。 */
+        val deviceAction: String,
+        /** 极窄尺寸下的动作缩写：「启动」「停止」等。 */
+        val deviceActionShort: String,
         val taskStatus: String,
         val taskCompact: String,
         val taskDetail: String,
@@ -50,9 +54,11 @@ object WidgetSupport {
             else -> account.deviceDisplayName(did)
         }
 
-        // 接水会话进行中时，实时状态优先于静态的「待机」
+        // 接水会话进行中时，实时状态优先于静态的「待机」；
+        // 会话属于当前设备时按钮动作也跟着变，RUNNING 阶段就是「停止设备」。
         val session = WaterService.activeStatus()
         val idleDeviceStatus = if (did.isNullOrEmpty()) "未配置设备" else "待机"
+        val deviceAction = deviceActionLabel(did)
 
         val scoreText = if (account != null && account.score > 0) {
             String.format(Locale.CHINA, "%,d", account.score)
@@ -84,7 +90,9 @@ object WidgetSupport {
         return Info(
             deviceName = deviceName,
             deviceStatus = session ?: idleDeviceStatus,
-            deviceCompact = session ?: "启动设备",
+            deviceCompact = deviceAction,
+            deviceAction = deviceAction,
+            deviceActionShort = deviceAction.removeSuffix("设备"),
             taskStatus = taskStatus,
             taskCompact = taskCompact,
             taskDetail = when {
@@ -101,16 +109,50 @@ object WidgetSupport {
         )
     }
 
-    /** 启动当前默认设备，返回可直接显示的中文状态。 */
-    fun startDevice(context: Context): String {
-        val did = AccountStore.getCurrent(context)?.selectedDeviceId()
+    /**
+     * 设备按钮当前的动作名。
+     *
+     * 会话属于该设备时取阶段名：STARTING「启动中」、RUNNING「停止设备」、
+     * STOPPING「停止中」、SETTLING「结算中」；没有会话时就是「启动设备」。
+     */
+    @JvmStatic
+    fun deviceActionLabel(did: String?): String {
+        val control = WaterControl.current()
+        return if (control != null && !did.isNullOrEmpty() && control.deviceId == did) {
+            control.phase.label
+        } else {
+            "启动设备"
+        }
+    }
+
+    /**
+     * 点一下设备按钮：会话属于该设备且已进入可停止阶段时停止，否则启动。
+     *
+     * 与首页设备列表的按钮保持一致——启动中/停止中/结算中这些中间态不再接受点击，
+     * 避免用户连点把同一台设备停两次。返回可直接显示的中文状态。
+     */
+    @JvmStatic
+    fun toggleDevice(
+        context: Context,
+        did: String?,
+        widgetId: Int = AppWidgetManager.INVALID_APPWIDGET_ID
+    ): String {
         if (did.isNullOrEmpty()) return "未配置设备"
-        return when (WaterService.start(context, did, AppWidgetManager.INVALID_APPWIDGET_ID)) {
+        val control = WaterControl.current()
+        if (control != null && control.deviceId == did) {
+            if (control.phase != WaterControlPhase.RUNNING) return control.phase.label
+            return if (WaterService.stop(context, did)) "正在停止…" else "停止失败，请重试"
+        }
+        return when (WaterService.start(context, did, widgetId)) {
             WaterService.StartResult.STARTED -> "正在启动…"
             WaterService.StartResult.ALREADY_RUNNING -> "已有接水会话"
             else -> "启动失败，请重试"
         }
     }
+
+    /** 作用于当前选中设备的 [toggleDevice]。 */
+    fun toggleDevice(context: Context): String =
+        toggleDevice(context, AccountStore.getCurrent(context)?.selectedDeviceId())
 
     /** 点一下启动积分任务，运行中再点一下停止；返回可直接显示的中文状态。 */
     fun toggleTasks(context: Context): String =

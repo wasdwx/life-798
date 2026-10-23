@@ -15,7 +15,7 @@ import java.util.Arrays;
 /**
  * 桌面小部件 Provider。
  * 不使用 android:configure（HyperOS 不兼容），直接添加。
- * 未配置时整个小部件点击打开配置页；已配置时通过单一按钮启动当前设备。
+ * 未配置时整个小部件点击打开配置页；已配置时通过单一按钮启动或停止当前设备。
  */
 public class WaterWidgetProvider extends AppWidgetProvider {
     public static final String ACTION_START = "com.water.widget.ACTION_START";
@@ -46,15 +46,8 @@ public class WaterWidgetProvider extends AppWidgetProvider {
             int widgetId = intent.getIntExtra(AppWidgetManager.EXTRA_APPWIDGET_ID,
                     AppWidgetManager.INVALID_APPWIDGET_ID);
 
-            WaterService.StartResult result = WaterService.start(context, did, widgetId);
-            String status;
-            if (result == WaterService.StartResult.STARTED) {
-                status = "设备启动中…";
-            } else if (result == WaterService.StartResult.ALREADY_RUNNING) {
-                status = "已有接水会话正在监测";
-            } else {
-                status = "启动失败，请稍后重试";
-            }
+            // 同一个按钮兼顾启动与停止：会话属于该设备且已进入可停止阶段时点击即停止。
+            String status = WidgetSupport.toggleDevice(context, did, widgetId);
             if (widgetId != AppWidgetManager.INVALID_APPWIDGET_ID) {
                 AppWidgetManager.getInstance(context).updateAppWidget(
                         widgetId,
@@ -94,9 +87,12 @@ public class WaterWidgetProvider extends AppWidgetProvider {
             }
             views.setOnClickPendingIntent(R.id.btn_start,
                     buildPI(context, widgetId, did));
+            String label = WidgetSupport.deviceActionLabel(did);
+            views.setTextViewText(R.id.btn_start, label);
             String activeStatus = WaterService.activeStatus();
+            String idleHint = "启动设备".equals(label) ? "点击启动当前设备" : "点击" + label;
             views.setTextViewText(R.id.widget_status,
-                    status != null ? status : activeStatus != null ? activeStatus : "点击启动当前设备");
+                    status != null ? status : activeStatus != null ? activeStatus : idleHint);
         }
         return views;
     }

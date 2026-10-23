@@ -28,8 +28,10 @@ public class IlifeApi {
     static final String CID = BuildConfig.API_CID;
     private static final String SIGN_SALT = BuildConfig.SIGN_SALT;
     private static final String UA = "Android_ilife798_3.1.9";
-    /** 服务端按此头判断客户端版本，缺失时接水会提示"请升级最新版APP"。 */
+    /** App 端（ApplicationType 1,1）版本号；服务端按此头判断客户端版本，缺失或不匹配时接水会提示"请升级最新版APP"。 */
     private static final String VERSION_CODE = "3.1.9";
+    /** 小程序端（ApplicationType 1,5）设备控制接口使用的版本号；与 App 端混用会被服务端判定为版本过旧。 */
+    private static final String MINI_VERSION_CODE = "2.0.83";
     private static volatile long appClockOffsetMillis;
     private static final String DEVICE_LOGIN_REJECTED_MESSAGE =
             "设备登录信息未被接受，请检查是否填反或重新完成设备登录";
@@ -619,10 +621,11 @@ public class IlifeApi {
         return httpRawApp(method, urlStr, body, token, "1,5");
     }
 
-    /** 同 httpRaw，但可指定 ApplicationType。 */
+    /** 同 httpRaw，但可指定 ApplicationType；版本号必须与该身份匹配，否则接水/停水会被提示升级。 */
     private static String httpRawApp(String method, String urlStr, String body,
                                      String token, String appType) throws Exception {
-        return httpRawApp(method, urlStr, body, token, appType, VERSION_CODE);
+        return httpRawApp(method, urlStr, body, token, appType,
+                "1,1".equals(appType) ? VERSION_CODE : MINI_VERSION_CODE);
     }
 
     /** 幂等 GET 的重试退避（毫秒）。写操作与设备控制一律不重试。 */

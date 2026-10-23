@@ -491,6 +491,8 @@ public class WaterService extends Service {
         mainHandler.removeCallbacksAndMessages(null);
         WaterControl.setPhase(reservationId, WaterControlPhase.STOPPING);
         notifyWaterProgress("正在停止设备…");
+        // 小部件的按钮动作跟着阶段走，停止期间显示「停止中」而不是还能再点一次停止。
+        publishStatus("正在停止设备…");
         IlifeApi.devEndWithToken(current.billToken, current.did, (result, error) -> onMain(() -> {
             if (!isActive(current)) return;
             current.stopRequested = false;

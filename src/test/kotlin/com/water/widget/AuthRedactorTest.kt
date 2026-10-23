@@ -102,10 +102,57 @@ class AuthRedactorTest {
         assertTrue(masked.contains("phone=<redacted"))
     }
 
-    @Test fun nonJsonBodyIsFullyRedacted() {
-        val summary = AuthRedactor.summarize("raw text containing " + phone)
+    @Test fun nonJsonBodyIsShownButScrubbed() {
+        val summary = AuthRedactor.summarize(
+            "EXCEPTION UnknownHostException: Unable to resolve host for " + phone
+        )
         assertFalse(summary.contains(phone))
         assertTrue(summary.contains("non-json"))
+        // 错误正文必须保留：以前整段变成 <redacted len=N>，异常原因全丢，没法排查
+        assertTrue(summary.contains("UnknownHostException"))
+    }
+
+    @Test fun timestampIsNotMistakenForPhone() {
+        // 13 位时间戳 / 16 位流水号不能被当成手机号切碎（之前会出现 <redacted len=11>78 这种畸形输出）
+        val summary = AuthRedactor.summarize("{\"ctime\":1761234567890,\"refId\":1761234567890123}")
+        assertTrue(summary.contains("ctime=1761234567890"))
+        assertTrue(summary.contains("1761234567890123"))
+    }
+
+    @Test fun maskedPhoneIpAndGeoAreScrubbed() {
+        // 全部为构造的假数据：203.0.113.0/24 是 RFC 5737 保留的文档网段
+        val text = "pkPn=138******99 ip=203.0.113.9 geo={coordinates=[123.4567000,45.6789000]}"
+        val scrubbed = AuthRedactor.scrubFreeText(text)
+        assertFalse(scrubbed.contains("138******99"))
+        assertFalse(scrubbed.contains("203.0.113.9"))
+        assertFalse(scrubbed.contains("123.4567000"))
+        assertFalse(scrubbed.contains("45.6789000"))
+    }
+
+    @Test fun addressAndCompanyInsideParenthesesAreScrubbed() {
+        val text = "msg=管线/饮水机设备(示例校区A栋101室)消费 abbr=(示例科技有限公司)"
+        val scrubbed = AuthRedactor.scrubFreeText(text)
+        assertFalse(scrubbed.contains("示例校区A栋101室"))
+        assertFalse(scrubbed.contains("示例科技有限公司"))
+        // 不含地址特征的括号内容不该被误伤
+        assertTrue(AuthRedactor.scrubFreeText("(非json len=108)").contains("非json len=108"))
+    }
+
+    @Test fun nestedLocationPathIsRedacted() {
+        val response = JSONObject()
+            .put("code", 0)
+            .put(
+                "data",
+                JSONObject().put(
+                    "addr",
+                    JSONObject().put("city", "示例市").put("detail", "示例大学")
+                ).put("aw", JSONObject().put("ep", JSONObject().put("abbr", "示例公司")))
+            )
+            .toString()
+        val summary = AuthRedactor.summarize(response)
+        assertFalse(summary.contains("示例市"))
+        assertFalse(summary.contains("示例大学"))
+        assertFalse(summary.contains("示例公司"))
     }
 
     @Test fun nestedArraysAndUnknownKeysAreHandled() {

@@ -49,7 +49,7 @@ GitHub Actions 也需配置同名的两个 secret；缺少任何发布配置时�
 ### 个人版发布规则
 
 Tag 必须等于 `v` 加 `app/build.gradle.kts` 中的 `versionName`。
-`v5.4.7` 这样的无后缀 tag 发布为正式版；带 `-personal.1`、`-rc.1` 等后缀的 tag 发布为预发布。
+`v5.4.8` 这样的无后缀 tag 发布为正式版；带 `-personal.1`、`-rc.1` 等后缀的 tag 发布为预发布。
 工作流在 APK 构建、签名验证、上传成功后才解除草稿状态，重新运行时也会按 tag 修正预发布标记。
 应用检查 `wasdwx/life-798` 的已发布版本，忽略草稿及没有就绪 APK 的 release；预发布默认不提示。
 

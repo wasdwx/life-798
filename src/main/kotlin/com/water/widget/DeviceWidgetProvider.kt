@@ -21,14 +21,14 @@ class DeviceWidgetProvider : AppWidgetProvider() {
 
     override fun onReceive(context: Context, intent: Intent) {
         super.onReceive(context, intent)
-        if (intent.action != ACTION_START_DEVICE) return
+        if (intent.action != ACTION_TOGGLE_DEVICE && intent.action != LEGACY_ACTION_START_DEVICE) return
         val manager = AppWidgetManager.getInstance(context) ?: return
         // 服务是异步拉起的，点击瞬间还读不到运行状态，先用返回值顶上，
         // 随后服务自己广播的刷新会覆盖掉它。
         push(
             context, manager,
             manager.getAppWidgetIds(ComponentName(context, DeviceWidgetProvider::class.java)),
-            WidgetSupport.startDevice(context)
+            WidgetSupport.toggleDevice(context)
         )
     }
 
@@ -37,9 +37,9 @@ class DeviceWidgetProvider : AppWidgetProvider() {
         // 空闲时显示设备名比显示「待机」有用；会话进行中才让位给实时状态
         val idle = info.deviceName.takeIf { info.deviceStatus == "待机" } ?: info.deviceStatus
         ids.forEach { id -> manager.updateAppWidget(id, WidgetSupport.tileViews(
-            context, id, DeviceWidgetProvider::class.java, ACTION_START_DEVICE, REQ,
+            context, id, DeviceWidgetProvider::class.java, ACTION_TOGGLE_DEVICE, REQ,
             iconRes = R.drawable.ic_water_drop,
-            title = "启动设备",
+            title = info.deviceAction,
             status = override ?: idle,
             compact = override ?: info.deviceCompact,
             detail = if (info.deviceStatus == "待机") info.usageText else "${info.deviceName}\n${info.usageText}",
@@ -48,7 +48,10 @@ class DeviceWidgetProvider : AppWidgetProvider() {
     }
 
     companion object {
-        const val ACTION_START_DEVICE = "com.water.widget.square.START_DEVICE"
+        const val ACTION_TOGGLE_DEVICE = "com.water.widget.square.TOGGLE_DEVICE"
+
+        /** 旧版本留在启动器里的点击动作，升级后仍可能被触发，继续接住。 */
+        private const val LEGACY_ACTION_START_DEVICE = "com.water.widget.square.START_DEVICE"
         private const val REQ = 2101
     }
 }

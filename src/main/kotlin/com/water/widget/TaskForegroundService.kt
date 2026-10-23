@@ -155,11 +155,27 @@ class TaskForegroundService : Service() {
         mainHandler.postDelayed(batchTimeout, MAX_BATCH_MILLIS)
 
         // 息屏/刚唤醒时网络常常还停在 CONNECTING，或者「连着 Wi-Fi 但未验证」，
-        // 这时立刻发请求会瞬间失败、整批任务报废。先等系统确认网络可用（最多 20 秒）。
+        // 这时立刻发请求会瞬间失败、整批任务报废。先等系统确认网络可用（最多 8 秒）。
+        // 等不到就不要硬撞：直接结束本批并安排补跑，省掉「白等 + 4 次重试 × 退避」的几十秒。
         Thread {
-            NetReady.await(this)
+            val networkReady = NetReady.await(this)
             onMain {
                 if (!isActive(runGeneration)) return@onMain
+                if (!networkReady) {
+                    networkFailures = true
+                    appendTaskLog("网络不可用（未就绪），本次跳过全部账号，稍后自动补跑")
+                    plannedLanes.forEachIndexed { laneIndex, _ ->
+                        TaskRunRepository.updateLane(
+                            laneId = laneIndex + 1,
+                            currentTask = "网络不可用",
+                            phase = TaskLanePhase.FAILED
+                        )
+                        TaskRunRepository.completeLane(laneIndex + 1)
+                        completedLanes += 1
+                    }
+                    if (completedLanes >= plannedLanes.size) finishRun()
+                    return@onMain
+                }
                 plannedLanes.forEachIndexed { laneIndex, lane ->
                     runAccountLane(
                         accounts = lane.accounts,
@@ -281,104 +297,196 @@ class TaskForegroundService : Service() {
         platform: TaskPlatform = TaskProtocol.preferredPlatform(account),
         done: (Int) -> Unit
     ) {
-        val token = TaskProtocol.token(account, platform)
-        IlifeApi.missionLstWithToken(token, platform) { missionJson, missionErr ->
-            onMain {
-                if (!isActive(runGeneration)) return@onMain
-                if (missionJson == null || missionJson.optInt("code", -999) != 0) {
-                    hadFailures = true
-                    recordTokenFailure(account, platform, token, missionJson)
-                    appendTaskLog(
-                        "  [$account][$platform] 获取任务列表失败: " + TaskProtocol.failure(missionJson, missionErr, token)
-                    )
-                    // missionJson == null 是连接层失败（超时/DNS/断网），不是服务端明确拒绝。
-                    // 这种时候主平台换一个通道（App 平台）往往能通，别直接放弃这个账号。
-                    val networkFailure = missionJson == null
-                    val mainExpired = missionJson?.optInt("code") == -99
-                    if (platform == TaskPlatform.MAIN && account.hasAppToken() && (mainExpired || networkFailure)) {
-                        appendTaskLog(
-                            if (networkFailure) "  主平台网络失败，改为执行 App 平台任务"
-                            else "  主平台登录失效，改为执行有效的 App 平台任务"
-                        )
-                        loadAndRunAccountTasks(account, laneId, runGeneration, TaskPlatform.APP, done)
-                        return@onMain
-                    }
-                    // 连接层失败才记，用于收尾时决定是否自动补跑
-                    if (missionJson == null) networkFailures = true
-                    TaskRunRepository.updateLane(
-                        laneId = laneId,
-                        currentTask = "任务列表获取失败",
-                        phase = TaskLanePhase.FAILED
-                    )
-                    done(0)
-                    return@onMain
-                }
-
-                val data = missionJson.optJSONObject("data")
-                val missions = data?.optJSONArray("missions")
-                val score = data?.optJSONObject("accScoreRsp")?.optInt("validScore", -1) ?: -1
-                appendTaskLog("  当前积分: $score，任务数: ${missions?.length() ?: 0}")
-                if (score >= 0) {
-                    // 缓存下来供桌面小部件离线展示，小部件不能自己发网络请求
-                    account.score = score
-                    AccountStore.updateScore(this@TaskForegroundService, account.phone, token, score)
-                }
+        loadMissionStage(account, laneId, runGeneration, platform, attempt = 0) { missionJson, _, effectivePlatform ->
+            if (!isActive(runGeneration)) return@loadMissionStage
+            // missionJson == null 表示连接层失败（超时/DNS/断网），此时签到、进度接口同样连不上，
+            // 再逐个去撞只是把等待时间翻几倍，这里直接结束本账号。
+            if (missionJson == null) {
+                appendTaskLog("  [$account] 任务列表连不上服务端，跳过本账号其余阶段")
                 TaskRunRepository.updateLane(
                     laneId = laneId,
-                    currentTask = "检查每日签到",
-                    phase = TaskLanePhase.SIGNING_IN
+                    currentTask = "网络不可用",
+                    phase = TaskLanePhase.FAILED
                 )
-                runDailySignInIfNeeded(account, platform, data, laneId, runGeneration) { signGained ->
-                    TaskRunRepository.updateLane(
-                        laneId = laneId,
-                        currentTask = "正在合并任务列表",
-                        phase = TaskLanePhase.LOADING_MISSIONS
-                    )
-                    loadAppMissionsIfNeeded(account, platform, missions, laneId, runGeneration) { plannedMissions ->
-                        TaskRunRepository.updateLane(
-                            laneId = laneId,
-                            currentTask = "核对今日任务进度",
-                            phase = TaskLanePhase.LOADING_MISSIONS
-                        )
-                        IlifeApi.scoreLstWithToken(token) { scoreJson, scoreErr ->
-                            onMain {
-                                if (!isActive(runGeneration)) return@onMain
-                                if (scoreJson == null || scoreJson.optInt("code", -999) != 0) {
-                                    hadFailures = true
-                                    recordTokenFailure(account, platform, token, scoreJson)
-                                    appendTaskLog(
-                                        "  [$account] 获取今日任务进度失败: " +
-                                            TaskProtocol.failure(scoreJson, scoreErr, token)
-                                    )
-                                }
-                                val doneCount = parseTodayDoneCount(scoreJson)
-                                val work = TaskMissionPlanner.buildWork(plannedMissions, doneCount)
-                                if (work.isEmpty()) {
-                                    appendTaskLog("  [$account] 无可执行任务（已完成/无积分/已过滤）")
-                                    TaskRunRepository.updateLane(
-                                        laneId = laneId,
-                                        currentTask = "没有待执行任务",
-                                        phase = TaskLanePhase.WAITING
-                                    )
-                                    done(signGained)
-                                } else {
-                                    appendTaskLog("  待执行 ${work.size} 次任务")
-                                    runMissionItems(
-                                        account = account,
-                                        work = work,
-                                        index = 0,
-                                        gained = signGained,
-                                        laneId = laneId,
-                                        runGeneration = runGeneration,
-                                        done = done
-                                    )
-                                }
-                            }
+                done(0)
+                return@loadMissionStage
+            }
+            val data = missionJson.optJSONObject("data")
+            val missions = data?.optJSONArray("missions")
+            val score = data?.optJSONObject("accScoreRsp")?.optInt("validScore", -1) ?: -1
+            appendTaskLog("  当前积分: " + score + "，任务数: " + (missions?.length() ?: 0))
+            if (score >= 0) {
+                // 缓存下来供桌面小部件离线展示，小部件不能自己发网络请求
+                account.score = score
+                AccountStore.updateScore(
+                    this@TaskForegroundService,
+                    account.phone,
+                    TaskProtocol.token(account, effectivePlatform),
+                    score
+                )
+            }
+            TaskRunRepository.updateLane(
+                laneId = laneId,
+                currentTask = "检查每日签到",
+                phase = TaskLanePhase.SIGNING_IN
+            )
+            runDailySignInIfNeeded(account, effectivePlatform, data, laneId, runGeneration) { signGained ->
+                TaskRunRepository.updateLane(
+                    laneId = laneId,
+                    currentTask = "正在合并任务列表",
+                    phase = TaskLanePhase.LOADING_MISSIONS
+                )
+                loadAppMissionsIfNeeded(account, effectivePlatform, missions, laneId, runGeneration) { plannedMissions ->
+                    loadScoreProgressStage(account, effectivePlatform, laneId, runGeneration, attempt = 0) { doneCount ->
+                        val work = TaskMissionPlanner.buildWork(plannedMissions, doneCount)
+                        if (work.isEmpty()) {
+                            appendTaskLog("  [$account] 无可执行任务（已完成/无积分/已过滤）")
+                            TaskRunRepository.updateLane(
+                                laneId = laneId,
+                                currentTask = "没有待执行任务",
+                                phase = TaskLanePhase.WAITING
+                            )
+                            done(signGained)
+                        } else {
+                            appendTaskLog("  待执行 " + work.size + " 次任务")
+                            runMissionItems(
+                                account = account,
+                                work = work,
+                                index = 0,
+                                gained = signGained,
+                                laneId = laneId,
+                                runGeneration = runGeneration,
+                                done = done
+                            )
                         }
                     }
                 }
             }
         }
+    }
+
+    /**
+     * 阶段一：任务列表。
+     *
+     * 以前这里失败就直接 done(0)，签到 / 进度核对 / 领奖全部跟着不执行——一个接口把整批任务拖死。
+     * 现在它只负责「拿到任务列表」：失败先等 5 秒重试一次，主平台连不上或失效时切 App 平台，
+     * 仍然失败就把 null 交给调用方，由调用方决定后面几个阶段怎么走。
+     */
+    private fun loadMissionStage(
+        account: Account,
+        laneId: Int,
+        runGeneration: Int,
+        platform: TaskPlatform,
+        attempt: Int,
+        done: (JSONObject?, String?, TaskPlatform) -> Unit
+    ) {
+        if (!isActive(runGeneration)) return
+        val token = TaskProtocol.token(account, platform)
+        if (token.isBlank()) {
+            done(null, "无可用 Token", platform)
+            return
+        }
+        IlifeApi.missionLstWithToken(token, platform) { json, err ->
+            onMain {
+                if (!isActive(runGeneration)) return@onMain
+                if (json != null && json.optInt("code", -999) == 0) {
+                    done(json, null, platform)
+                    return@onMain
+                }
+                hadFailures = true
+                recordTokenFailure(account, platform, token, json)
+                val networkFailure = json == null
+                if (networkFailure) networkFailures = true
+                val mainExpired = json?.optInt("code") == -99
+                appendTaskLog(
+                    "  [" + account + "][" + platform + "] 获取任务列表失败(" +
+                        (attempt + 1) + "/" + STAGE_RETRY_ATTEMPTS + "): " +
+                        TaskProtocol.failure(json, err, token)
+                )
+                if (platform == TaskPlatform.MAIN && account.hasAppToken() && (mainExpired || networkFailure)) {
+                    appendTaskLog(
+                        if (networkFailure) "  主平台网络失败，改为执行 App 平台任务"
+                        else "  主平台登录失效，改为执行有效的 App 平台任务"
+                    )
+                    loadMissionStage(account, laneId, runGeneration, TaskPlatform.APP, attempt, done)
+                    return@onMain
+                }
+                if (attempt + 1 < STAGE_RETRY_ATTEMPTS) {
+                    appendTaskLog("  " + (STAGE_RETRY_DELAY_MILLIS / 1000) + " 秒后重试任务列表")
+                    TaskRunRepository.updateLane(
+                        laneId = laneId,
+                        currentTask = "任务列表重试中",
+                        phase = TaskLanePhase.WAITING
+                    )
+                    postDelayed(STAGE_RETRY_DELAY_MILLIS, runGeneration) {
+                        loadMissionStage(account, laneId, runGeneration, platform, attempt + 1, done)
+                    }
+                } else {
+                    appendTaskLog("  任务列表多次失败，继续其余阶段")
+                    done(null, err, platform)
+                }
+            }
+        }
+    }
+
+    /**
+     * 阶段三：今日任务进度。与任务列表彻底解耦，自己重试；最终失败就按「未知进度」继续，
+     * 由 TaskMissionPlanner 自己过滤已完成的项。
+     */
+    private fun loadScoreProgressStage(
+        account: Account,
+        platform: TaskPlatform,
+        laneId: Int,
+        runGeneration: Int,
+        attempt: Int,
+        done: (Map<String, Int>) -> Unit
+    ) {
+        if (!isActive(runGeneration)) return
+        val token = TaskProtocol.token(account, platform)
+        TaskRunRepository.updateLane(
+            laneId = laneId,
+            currentTask = "核对今日任务进度",
+            phase = TaskLanePhase.LOADING_MISSIONS
+        )
+        IlifeApi.scoreLstWithToken(token) { json, err ->
+            onMain {
+                if (!isActive(runGeneration)) return@onMain
+                if (json != null && json.optInt("code", -999) == 0) {
+                    done(parseTodayDoneCount(json))
+                    return@onMain
+                }
+                hadFailures = true
+                recordTokenFailure(account, platform, token, json)
+                if (json == null) networkFailures = true
+                appendTaskLog(
+                    "  [" + account + "] 获取今日任务进度失败(" +
+                        (attempt + 1) + "/" + STAGE_RETRY_ATTEMPTS + "): " +
+                        TaskProtocol.failure(json, err, token)
+                )
+                if (attempt + 1 < STAGE_RETRY_ATTEMPTS) {
+                    TaskRunRepository.updateLane(
+                        laneId = laneId,
+                        currentTask = "进度重试中",
+                        phase = TaskLanePhase.WAITING
+                    )
+                    postDelayed(STAGE_RETRY_DELAY_MILLIS, runGeneration) {
+                        loadScoreProgressStage(account, platform, laneId, runGeneration, attempt + 1, done)
+                    }
+                } else {
+                    appendTodoFallback(laneId)
+                    done(emptyMap())
+                }
+            }
+        }
+    }
+
+    private fun appendTodoFallback(laneId: Int) {
+        appendTaskLog("  进度多次失败，按未知进度继续")
+        TaskRunRepository.updateLane(
+            laneId = laneId,
+            currentTask = "按未知进度继续",
+            phase = TaskLanePhase.WAITING
+        )
     }
 
     private fun runDailySignInIfNeeded(
@@ -410,13 +518,25 @@ class TaskForegroundService : Service() {
                 }
             }
         }.orEmpty()
-        val plan = DailySignInPlanner.plan(
-            weekMask = weekMask,
-            weekDay = weekDay,
-            adId = dailyRsp?.optString("adId", ""),
-            score = dailyRsp?.optInt("score", 5) ?: 0,
-            rules = rules
-        )
+        // 任务列表没拿到时 dailyRSP 也不存在，但签到是独立接口，仍按官方默认项试一次，
+        // 不再因为任务列表失败就把签到一起放弃。
+        val plan = if (data == null) {
+            appendTaskLog("  [$account] 每日签到: 任务列表不可用，按默认签到项尝试")
+            DailySignInPlanner.plan(
+                weekMask = 0,
+                weekDay = weekDay,
+                adId = FALLBACK_SIGN_IN_AD_ID,
+                score = FALLBACK_SIGN_IN_SCORE
+            )
+        } else {
+            DailySignInPlanner.plan(
+                weekMask = weekMask,
+                weekDay = weekDay,
+                adId = dailyRsp?.optString("adId", ""),
+                score = dailyRsp?.optInt("score", 5) ?: 0,
+                rules = rules
+            )
+        }
         when {
             plan.adId.isBlank() -> {
                 appendTaskLog("  [$account] 每日签到: 无签到数据，跳过")
@@ -894,6 +1014,14 @@ class TaskForegroundService : Service() {
         private const val STALL_TIMEOUT_MILLIS = 4 * 60_000L
         private const val MAX_BATCH_MILLIS = 60 * 60_000L
         private const val WIDGET_REFRESH_INTERVAL_MILLIS = 3_000L
+
+        /** 任务列表 / 今日进度各自独立重试：第一次失败后等 5 秒再试一次，仍失败才降级。 */
+        private const val STAGE_RETRY_ATTEMPTS = 2
+        private const val STAGE_RETRY_DELAY_MILLIS = 5_000L
+
+        /** 任务列表拿不到时，签到仍按官方默认项尝试（adId 与基础分来自官方客户端）。 */
+        private const val FALLBACK_SIGN_IN_AD_ID = "DAILY_CHECK_IN"
+        private const val FALLBACK_SIGN_IN_SCORE = 5
 
         fun start(context: Context): StartResult {
             if (TaskRunRepository.state.value.running) return StartResult.ALREADY_RUNNING

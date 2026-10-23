@@ -7,8 +7,8 @@
     <string name="widget_label_combo">出水 · 组合</string>
     <string name="widget_label_device">出水 · 启动设备</string>
     <string name="widget_label_task">出水 · 积分任务</string>
-    <string name="widget_desc_classic">单个大按钮，启动当前默认设备</string>
-    <string name="widget_desc_combo">启动设备 + 积分任务，拉高可显示设备名、积分与今日用水</string>
-    <string name="widget_desc_device">仅启动当前默认设备，1×1 起步，拉大显示更多信息</string>
+    <string name="widget_desc_classic">单个大按钮，启动或停止当前默认设备</string>
+    <string name="widget_desc_combo">启动/停止设备 + 积分任务，拉高可显示设备名、积分与今日用水</string>
+    <string name="widget_desc_device">启动或停止当前默认设备，1×1 起步，拉大显示更多信息</string>
     <string name="widget_desc_task">仅执行积分任务，1×1 起步，拉大显示更多信息</string>
 </resources>
