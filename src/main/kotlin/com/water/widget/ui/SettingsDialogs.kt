@@ -8,14 +8,18 @@ import android.provider.Settings
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Switch
@@ -42,6 +46,28 @@ import com.water.widget.UpdatePolicy
 import java.time.ZonedDateTime
 import java.time.format.DateTimeFormatter
 
+/** 弹窗内统一的「标题 + 说明 + 开关」行，说明作为副标题，避免长标题挤压开关。 */
+@Composable
+private fun DialogSwitchRow(
+    title: String,
+    subtitle: String? = null,
+    checked: Boolean,
+    onCheckedChange: (Boolean) -> Unit
+) {
+    Row(
+        Modifier.fillMaxWidth().padding(vertical = 10.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Column(Modifier.weight(1f).padding(end = 16.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+            Text(title, fontSize = 15.sp)
+            if (subtitle != null) {
+                Text(subtitle, fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+        }
+        Switch(checked = checked, onCheckedChange = onCheckedChange)
+    }
+}
+
 /** 自动积分任务设置弹窗：开关、执行时间、权限状态。 */
 @Composable
 internal fun AutoTaskSettingsDialog(onDismiss: () -> Unit) {
@@ -62,40 +88,48 @@ internal fun AutoTaskSettingsDialog(onDismiss: () -> Unit) {
         onDismissRequest = onDismiss,
         title = { Text("自动积分任务") },
         text = {
-            Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                    Text("启用自动任务", Modifier.weight(1f))
-                    Switch(checked = enabled, onCheckedChange = { value ->
-                        AutoTasks.configure(context, value, minute)
-                        enabled = value
-                        if (value && !notificationsAllowed) requestNotifications.launch(android.Manifest.permission.POST_NOTIFICATIONS)
-                    })
+            Column(Modifier.heightIn(max = 420.dp).verticalScroll(rememberScrollState())) {
+                DialogSwitchRow("启用自动任务", "到点自动运行积分任务", enabled) { value ->
+                    AutoTasks.configure(context, value, minute)
+                    enabled = value
+                    if (value && !notificationsAllowed) requestNotifications.launch(android.Manifest.permission.POST_NOTIFICATIONS)
                 }
-                TextButton(onClick = {
-                    TimePickerDialog(context, { _, hour, minuteOfHour ->
-                        minute = hour * 60 + minuteOfHour
-                        AutoTasks.configure(context, enabled, minute)
-                    }, minute / 60, minute % 60, true).show()
-                }) { Text("执行时间：%02d:%02d".format(minute / 60, minute % 60)) }
-                Text(when {
-                    !enabled -> "自动任务已关闭"
-                    !exactAllowed -> "尚未安排任务：请先允许精确闹钟"
-                    else -> "下次执行：" + AutoTasks.nextRun(ZonedDateTime.now(), minute)
-                        .format(DateTimeFormatter.ofPattern("MM-dd HH:mm"))
-                }, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                if (!exactAllowed) TextButton(onClick = {
-                    context.startActivity(Intent(Settings.ACTION_REQUEST_SCHEDULE_EXACT_ALARM))
-                }) { Text("允许精确闹钟") }
-                if (!batteryExempt) TextButton(onClick = {
-                    context.startActivity(
-                        Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS, Uri.parse("package:" + context.packageName))
-                    )
-                }) { Text("允许后台运行（电池优化设置）") }
-                if (!notificationsAllowed) TextButton(onClick = {
-                    requestNotifications.launch(android.Manifest.permission.POST_NOTIFICATIONS)
-                }) { Text("允许任务通知") }
-                Text("部分系统仍可能限制后台运行。任务最长运行一小时；可随时从任务页停止。",
-                    fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+                Row(Modifier.fillMaxWidth().padding(vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Text("执行时间", Modifier.weight(1f), fontSize = 15.sp)
+                    TextButton(onClick = {
+                        TimePickerDialog(context, { _, hour, minuteOfHour ->
+                            minute = hour * 60 + minuteOfHour
+                            AutoTasks.configure(context, enabled, minute)
+                        }, minute / 60, minute % 60, true).show()
+                    }) { Text("%02d:%02d".format(minute / 60, minute % 60)) }
+                }
+                Text(
+                    when {
+                        !enabled -> "自动任务已关闭"
+                        !exactAllowed -> "尚未安排任务：请先允许精确闹钟"
+                        else -> "下次执行：" + AutoTasks.nextRun(ZonedDateTime.now(), minute)
+                            .format(DateTimeFormatter.ofPattern("MM-dd HH:mm"))
+                    },
+                    fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                if (!exactAllowed || !batteryExempt || !notificationsAllowed) {
+                    HorizontalDivider(Modifier.padding(top = 8.dp), color = MaterialTheme.colorScheme.outlineVariant)
+                    if (!exactAllowed) TextButton(onClick = {
+                        context.startActivity(Intent(Settings.ACTION_REQUEST_SCHEDULE_EXACT_ALARM))
+                    }) { Text("允许精确闹钟") }
+                    if (!batteryExempt) TextButton(onClick = {
+                        context.startActivity(
+                            Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS, Uri.parse("package:" + context.packageName))
+                        )
+                    }) { Text("允许后台运行") }
+                    if (!notificationsAllowed) TextButton(onClick = {
+                        requestNotifications.launch(android.Manifest.permission.POST_NOTIFICATIONS)
+                    }) { Text("允许任务通知") }
+                }
+                Text("部分系统仍可能限制后台运行；任务最长运行一小时，可随时从任务页停止。",
+                    fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(top = 8.dp))
             }
         },
         confirmButton = { TextButton(onClick = onDismiss) { Text("完成") } }
@@ -112,26 +146,28 @@ internal fun UpdateSettingsDialog(onCheckUpdate: () -> Unit, onDismiss: () -> Un
         onDismissRequest = onDismiss,
         title = { Text("自动检查更新") },
         text = {
-            Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            Column(Modifier.heightIn(max = 420.dp).verticalScroll(rememberScrollState())) {
+                Text("检查频率", fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 UpdatePolicy.entries.forEach { item ->
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        RadioButton(selected = policy == item, onClick = {
-                            policy = item
-                            AppUpdates.prefs(context).edit().putString("policy", item.name).apply()
-                        })
-                        Text(item.label)
+                    Row(
+                        Modifier.fillMaxWidth()
+                            .padding(vertical = 2.dp)
+                            .clickable {
+                                policy = item
+                                AppUpdates.prefs(context).edit().putString("policy", item.name).apply()
+                            },
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        RadioButton(selected = policy == item, onClick = null)
+                        Text(item.label, Modifier.padding(start = 8.dp), fontSize = 15.sp)
                     }
                 }
-                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                    Text("包含预发布版本", Modifier.weight(1f))
-                    Switch(checked = previews, onCheckedChange = { value ->
-                        previews = value
-                        AppUpdates.prefs(context).edit().putBoolean("prereleases", value).apply()
-                        onCheckUpdate()
-                    })
+                HorizontalDivider(Modifier.padding(vertical = 6.dp), color = MaterialTheme.colorScheme.outlineVariant)
+                DialogSwitchRow("包含预发布版本", "草稿和没有就绪 APK 的发布不会作为更新", previews) { value ->
+                    previews = value
+                    AppUpdates.prefs(context).edit().putBoolean("prereleases", value).apply()
+                    onCheckUpdate()
                 }
-                Text("草稿和没有就绪 APK 的发布不会作为更新。", fontSize = 12.sp,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant)
                 TextButton(onClick = onCheckUpdate) { Text("立即检查") }
             }
         },
@@ -169,37 +205,34 @@ internal fun DiagnosticsDialog(onDismiss: () -> Unit) {
         onDismissRequest = onDismiss,
         title = { Text("诊断日志") },
         text = {
-            Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                    Text("记录诊断日志", Modifier.weight(1f))
-                    Switch(checked = enabled, onCheckedChange = { value ->
-                        DiagLog.setEnabled(context, value)
-                        enabled = value
-                        size = DiagLog.totalBytes()
-                    })
+            Column {
+                DialogSwitchRow("记录诊断日志", "关闭时不会写入任何内容", enabled) { value ->
+                    DiagLog.setEnabled(context, value)
+                    enabled = value
+                    size = DiagLog.totalBytes()
                 }
                 if (enabled) {
-                    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                        Text("详细模式（记录脱敏后的请求/响应摘要）", Modifier.weight(1f))
-                        Switch(checked = verbose, onCheckedChange = { value ->
-                            DiagLog.setVerbose(context, value)
-                            verbose = value
-                        })
+                    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+                    DialogSwitchRow("详细模式", "记录脱敏后的请求/响应摘要", verbose) { value ->
+                        DiagLog.setVerbose(context, value)
+                        verbose = value
                     }
-                    Text("已用 " + formatBytes(size) + "；超过上限会自动滚动，异常单独保留。",
-                        fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text(
+                        "已用 " + formatBytes(size) + "，超过上限自动滚动，异常单独保留。",
+                        fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Row(Modifier.fillMaxWidth().padding(top = 8.dp), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                         TextButton(onClick = { export(false) }) { Text("导出日志") }
                         TextButton(onClick = { export(true) }) { Text("只导出异常") }
-                        TextButton(onClick = {
-                            DiagLog.clear()
-                            size = 0L
-                            Toast.makeText(context, "已清空", Toast.LENGTH_SHORT).show()
-                        }) { Text("清空") }
+                        TextButton(
+                            onClick = {
+                                DiagLog.clear()
+                                size = 0L
+                                Toast.makeText(context, "已清空", Toast.LENGTH_SHORT).show()
+                            },
+                            colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.error)
+                        ) { Text("清空") }
                     }
-                } else {
-                    Text("关闭时不会写入任何内容。", fontSize = 12.sp,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
             }
         },
