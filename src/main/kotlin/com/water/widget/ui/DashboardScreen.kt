@@ -146,7 +146,9 @@ fun DashboardScreen(
     onStopDevice: (String) -> Unit = {},
     onSettings: () -> Unit = {},
     onToggleAutoTask: (Boolean) -> Unit = {},
+    onOpenAutoTask: () -> Unit = {},
     onToggleAutoUpdate: (Boolean) -> Unit = {},
+    onOpenAutoUpdate: () -> Unit = {},
     onCheckUpdate: () -> Unit = {},
     onOpenWaterUsage: () -> Unit = {},
     autoTaskEnabled: Boolean = false,
@@ -273,9 +275,11 @@ fun DashboardScreen(
                             onOpenSupport = { showSupportDialog = true },
                             autoTaskEnabled = autoTaskEnabled,
                             onToggleAutoTask = onToggleAutoTask,
+                            onOpenAutoTask = onOpenAutoTask,
                             autoUpdateEnabled = autoUpdateEnabled,
                             autoUpdateLabel = autoUpdateLabel,
                             onToggleAutoUpdate = onToggleAutoUpdate,
+                            onOpenAutoUpdate = onOpenAutoUpdate,
                             updateLabel = updateLabel,
                             onCheckUpdate = onCheckUpdate,
                             waterUsageLabel = waterUsageLabel,
@@ -725,9 +729,11 @@ private fun MineTab(
     onOpenSupport: () -> Unit,
     autoTaskEnabled: Boolean,
     onToggleAutoTask: (Boolean) -> Unit,
+    onOpenAutoTask: () -> Unit,
     autoUpdateEnabled: Boolean,
     autoUpdateLabel: String,
     onToggleAutoUpdate: (Boolean) -> Unit,
+    onOpenAutoUpdate: () -> Unit,
     updateLabel: String,
     onCheckUpdate: () -> Unit,
     waterUsageLabel: String,
@@ -754,10 +760,10 @@ private fun MineTab(
         SettingsSwitchRow(
             Icons.Default.CheckCircle, "自动积分任务",
             if (autoTaskEnabled) "按设定时间自动运行" else "已关闭",
-            autoTaskEnabled, onToggleAutoTask
+            autoTaskEnabled, onToggleAutoTask, onClick = onOpenAutoTask
         )
         HorizontalDivider(Modifier.padding(horizontal = 16.dp), color = MaterialTheme.colorScheme.outlineVariant)
-        SettingsSwitchRow(Icons.Default.Refresh, "自动检查更新", autoUpdateLabel, autoUpdateEnabled, onToggleAutoUpdate)
+        SettingsSwitchRow(Icons.Default.Refresh, "自动检查更新", autoUpdateLabel, autoUpdateEnabled, onToggleAutoUpdate, onClick = onOpenAutoUpdate)
     }
     SettingsGroup("应用设置") {
         SettingsRow(Icons.Default.WaterDrop, "预估水量设置", waterUsageLabel, onOpenWaterUsage)
@@ -847,9 +853,10 @@ internal fun SettingsSwitchRow(
     title: String,
     subtitle: String,
     checked: Boolean,
-    onCheckedChange: (Boolean) -> Unit
+    onCheckedChange: (Boolean) -> Unit,
+    onClick: () -> Unit = {}
 ) {
-    Surface(shape = WaterShapeTokens.card, color = MaterialTheme.colorScheme.surface, tonalElevation = 0.dp, modifier = Modifier.fillMaxWidth()) {
+    Surface(onClick = onClick, shape = WaterShapeTokens.card, color = MaterialTheme.colorScheme.surface, tonalElevation = 0.dp, modifier = Modifier.fillMaxWidth()) {
         Row(Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
             Box(Modifier.size(40.dp).clip(RoundedCornerShape(13.dp)).background(MaterialTheme.colorScheme.secondaryContainer), contentAlignment = Alignment.Center) {
                 Icon(icon, contentDescription = null, tint = MaterialTheme.colorScheme.onSecondaryContainer)

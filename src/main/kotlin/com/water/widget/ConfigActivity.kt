@@ -92,7 +92,7 @@ class ConfigActivity : ComponentActivity() {
                     onAccounts = { startActivity(Intent(this, AccountsActivity::class.java)) },
                     themeMode = ThemeSettings.mode(this),
                     onAppearance = { startActivity(Intent(this, AppearanceActivity::class.java)) },
-                    onSettings = { startActivity(Intent(this, AppSettingsActivity::class.java)) },
+                    onSettings = { openSettingsSection(AppSettingsActivity.SECTION_DIAG) },
                     onRunTasks = { runWithNotificationPermission(::runTasksInHome) },
                     onStopTasks = { TaskForegroundService.stop(this) },
                     onScores = { startActivity(Intent(this, ScoreActivity::class.java)) },
@@ -116,6 +116,7 @@ class ConfigActivity : ComponentActivity() {
                         autoTaskEnabled = enabled
                         if (enabled) runWithNotificationPermission { true }
                     },
+                    onOpenAutoTask = { openSettingsSection(AppSettingsActivity.SECTION_AUTO_TASK) },
                     autoUpdateEnabled = autoUpdateEnabled,
                     autoUpdateLabel = AppUpdates.policy(this).label,
                     onToggleAutoUpdate = { enabled ->
@@ -125,10 +126,11 @@ class ConfigActivity : ComponentActivity() {
                         autoUpdateEnabled = enabled
                         if (enabled) updates.check()
                     },
+                    onOpenAutoUpdate = { openSettingsSection(AppSettingsActivity.SECTION_UPDATE) },
                     updateLabel = update.message.ifBlank { "点击检查是否有新版本" },
                     onCheckUpdate = { updates.check(manual = true) },
                     waterUsageLabel = waterUsageLabel,
-                    onOpenWaterUsage = { startActivity(Intent(this, AppSettingsActivity::class.java)) }
+                    onOpenWaterUsage = { openSettingsSection(AppSettingsActivity.SECTION_WATER) }
                 )
                 if (riskDialogPending) {
                     com.water.widget.ui.TaskRiskDialog(
@@ -211,6 +213,14 @@ class ConfigActivity : ComponentActivity() {
         scoreGeneration++
         ui.removeCallbacksAndMessages(null)
         super.onDestroy()
+    }
+
+    /** 打开设置页的某一个分区（自动任务 / 用水量 / 检查更新 / 诊断日志）。 */
+    private fun openSettingsSection(section: String) {
+        startActivity(
+            Intent(this, AppSettingsActivity::class.java)
+                .putExtra(AppSettingsActivity.EXTRA_SECTION, section)
+        )
     }
 
     /** 页面只发送启动请求，真正的任务生命周期由 TaskForegroundService 持有。 */
