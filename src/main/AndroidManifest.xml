@@ -39,7 +39,6 @@
             </intent-filter>
         </activity>
 
-        <activity android:name=".AppSettingsActivity" android:exported="false" android:label="任务与更新" />
         <receiver android:name=".AutoTaskReceiver" android:exported="false">
             <intent-filter>
                 <action android:name="android.intent.action.BOOT_COMPLETED" />

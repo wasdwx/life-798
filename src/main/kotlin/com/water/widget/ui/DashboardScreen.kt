@@ -106,6 +106,7 @@ import com.water.widget.BuildConfig
 import com.water.widget.TaskRiskConsent
 import com.water.widget.WaterControlPhase
 import com.water.widget.WaterControlSession
+import com.water.widget.WaterUsageSettings
 import kotlinx.coroutines.launch
 import top.yukonga.miuix.kmp.blur.BlendColorEntry
 import top.yukonga.miuix.kmp.blur.BlurColors
@@ -144,13 +145,9 @@ fun DashboardScreen(
     onSelectDevice: (String) -> Unit,
     onStartDevice: (String) -> Unit,
     onStopDevice: (String) -> Unit = {},
-    onSettings: () -> Unit = {},
     onToggleAutoTask: (Boolean) -> Unit = {},
-    onOpenAutoTask: () -> Unit = {},
     onToggleAutoUpdate: (Boolean) -> Unit = {},
-    onOpenAutoUpdate: () -> Unit = {},
     onCheckUpdate: () -> Unit = {},
-    onOpenWaterUsage: () -> Unit = {},
     autoTaskEnabled: Boolean = false,
     autoUpdateEnabled: Boolean = false,
     autoUpdateLabel: String = "",
@@ -162,6 +159,10 @@ fun DashboardScreen(
     val context = LocalContext.current
     var taskRiskConfirmed by remember { mutableStateOf(TaskRiskConsent.isConfirmed(context)) }
     var showTaskRiskDialog by rememberSaveable { mutableStateOf(false) }
+    var showWaterDialog by rememberSaveable { mutableStateOf(false) }
+    var showAutoTaskDialog by rememberSaveable { mutableStateOf(false) }
+    var showUpdateDialog by rememberSaveable { mutableStateOf(false) }
+    var showDiagDialog by rememberSaveable { mutableStateOf(false) }
     val pagerState = rememberPagerState(
         initialPage = DashboardTab.CONTROL.ordinal,
         pageCount = { DashboardTab.entries.size }
@@ -271,19 +272,19 @@ fun DashboardScreen(
                             onWallet = onWallet,
                             themeMode = themeMode,
                             onOpenAppearanceSettings = onAppearance,
-                            onOpenSettings = onSettings,
                             onOpenSupport = { showSupportDialog = true },
                             autoTaskEnabled = autoTaskEnabled,
                             onToggleAutoTask = onToggleAutoTask,
-                            onOpenAutoTask = onOpenAutoTask,
                             autoUpdateEnabled = autoUpdateEnabled,
                             autoUpdateLabel = autoUpdateLabel,
                             onToggleAutoUpdate = onToggleAutoUpdate,
-                            onOpenAutoUpdate = onOpenAutoUpdate,
                             updateLabel = updateLabel,
                             onCheckUpdate = onCheckUpdate,
                             waterUsageLabel = waterUsageLabel,
-                            onOpenWaterUsage = onOpenWaterUsage
+                            onOpenWaterSettings = { showWaterDialog = true },
+                            onOpenAutoTaskSettings = { showAutoTaskDialog = true },
+                            onOpenUpdateSettings = { showUpdateDialog = true },
+                            onOpenDiagSettings = { showDiagDialog = true }
                         )
                         Spacer(Modifier.height(8.dp))
                     }
@@ -315,6 +316,28 @@ fun DashboardScreen(
     }
     if (showSupportDialog) {
         SupportDeveloperDialog(onDismiss = { showSupportDialog = false })
+    }
+    if (showWaterDialog) {
+        WaterUsageSettingsDialog(
+            estimate = WaterUsageSettings.read(context),
+            onSave = {
+                WaterUsageSettings.save(context, it)
+                showWaterDialog = false
+            },
+            onDismiss = { showWaterDialog = false }
+        )
+    }
+    if (showAutoTaskDialog) {
+        AutoTaskSettingsDialog(onDismiss = { showAutoTaskDialog = false })
+    }
+    if (showUpdateDialog) {
+        UpdateSettingsDialog(
+            onCheckUpdate = onCheckUpdate,
+            onDismiss = { showUpdateDialog = false }
+        )
+    }
+    if (showDiagDialog) {
+        DiagnosticsDialog(onDismiss = { showDiagDialog = false })
     }
     if (!taskRiskConfirmed && (pagerState.settledPage == DashboardTab.TASK.ordinal || showTaskRiskDialog)) {
         TaskRiskDialog(onConfirm = {
@@ -725,19 +748,19 @@ private fun MineTab(
     onWallet: () -> Unit,
     themeMode: AppThemeMode,
     onOpenAppearanceSettings: () -> Unit,
-    onOpenSettings: () -> Unit,
     onOpenSupport: () -> Unit,
     autoTaskEnabled: Boolean,
     onToggleAutoTask: (Boolean) -> Unit,
-    onOpenAutoTask: () -> Unit,
     autoUpdateEnabled: Boolean,
     autoUpdateLabel: String,
     onToggleAutoUpdate: (Boolean) -> Unit,
-    onOpenAutoUpdate: () -> Unit,
     updateLabel: String,
     onCheckUpdate: () -> Unit,
     waterUsageLabel: String,
-    onOpenWaterUsage: () -> Unit
+    onOpenWaterSettings: () -> Unit,
+    onOpenAutoTaskSettings: () -> Unit,
+    onOpenUpdateSettings: () -> Unit,
+    onOpenDiagSettings: () -> Unit
 ) {
     InfoCard(title = state.accountTitle, subtitle = state.accountSubtitle) {
         StatusRow("账号数量", "${state.accountCount}")
@@ -760,19 +783,19 @@ private fun MineTab(
         SettingsSwitchRow(
             Icons.Default.CheckCircle, "自动积分任务",
             if (autoTaskEnabled) "按设定时间自动运行" else "已关闭",
-            autoTaskEnabled, onToggleAutoTask, onClick = onOpenAutoTask
+            autoTaskEnabled, onToggleAutoTask, onClick = onOpenAutoTaskSettings
         )
         HorizontalDivider(Modifier.padding(horizontal = 16.dp), color = MaterialTheme.colorScheme.outlineVariant)
-        SettingsSwitchRow(Icons.Default.Refresh, "自动检查更新", autoUpdateLabel, autoUpdateEnabled, onToggleAutoUpdate, onClick = onOpenAutoUpdate)
+        SettingsSwitchRow(Icons.Default.Refresh, "自动检查更新", autoUpdateLabel, autoUpdateEnabled, onToggleAutoUpdate, onClick = onOpenUpdateSettings)
     }
     SettingsGroup("应用设置") {
-        SettingsRow(Icons.Default.WaterDrop, "预估水量设置", waterUsageLabel, onOpenWaterUsage)
+        SettingsRow(Icons.Default.WaterDrop, "预估水量设置", waterUsageLabel, onOpenWaterSettings)
         HorizontalDivider(Modifier.padding(horizontal = 16.dp), color = MaterialTheme.colorScheme.outlineVariant)
         SettingsRow(Icons.Default.Palette, "外观设置", themeMode.label, onOpenAppearanceSettings)
         HorizontalDivider(Modifier.padding(horizontal = 16.dp), color = MaterialTheme.colorScheme.outlineVariant)
         SettingsRow(Icons.Default.Refresh, "检查更新", updateLabel, onCheckUpdate)
         HorizontalDivider(Modifier.padding(horizontal = 16.dp), color = MaterialTheme.colorScheme.outlineVariant)
-        SettingsRow(Icons.Default.Settings, "诊断日志", "开关 · 详细模式 · 导出", onOpenSettings)
+        SettingsRow(Icons.Default.Settings, "诊断日志", "开关 · 详细模式 · 导出", onOpenDiagSettings)
         HorizontalDivider(Modifier.padding(horizontal = 16.dp), color = MaterialTheme.colorScheme.outlineVariant)
         SettingsRow(Icons.Default.Favorite, "支持开发者", "GitHub · wasdwx/life-798", onOpenSupport)
     }
