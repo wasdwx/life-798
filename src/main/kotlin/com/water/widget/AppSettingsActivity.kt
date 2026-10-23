@@ -80,40 +80,7 @@ class AppSettingsActivity : ComponentActivity() {
                     .statusBarsPadding().verticalScroll(rememberScrollState())
                     .padding(20.dp).navigationBarsPadding(), verticalArrangement = Arrangement.spacedBy(16.dp)) {
                     TextButton(onClick = { finish() }) { Text("返回") }
-                    Text("任务与更新", fontSize = 28.sp, fontWeight = FontWeight.Bold)
-                    SectionCard("每日自动积分任务") {
-                        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                            Text("启用自动任务", Modifier.weight(1f))
-                            Switch(checked = autoEnabled, onCheckedChange = { enabled ->
-                                AutoTasks.configure(this@AppSettingsActivity, enabled, minute)
-                                autoEnabled = enabled
-                                if (enabled && !notificationsAllowed) requestNotifications.launch(Manifest.permission.POST_NOTIFICATIONS)
-                            })
-                        }
-                        TextButton(onClick = {
-                            TimePickerDialog(this@AppSettingsActivity, { _, hour, minuteOfHour ->
-                                minute = hour * 60 + minuteOfHour
-                                AutoTasks.configure(this@AppSettingsActivity, autoEnabled, minute)
-                            }, minute / 60, minute % 60, true).show()
-                        }) { Text("执行时间：%02d:%02d".format(minute / 60, minute % 60)) }
-                        Text(when {
-                            !autoEnabled -> "自动任务已关闭"
-                            !exactAllowed -> "尚未安排任务：请先允许精确闹钟"
-                            else -> "下次执行：" + AutoTasks.nextRun(ZonedDateTime.now(), minute)
-                                .format(DateTimeFormatter.ofPattern("MM-dd HH:mm"))
-                        }, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                        if (!exactAllowed) TextButton(onClick = { openSystemSettings(Settings.ACTION_REQUEST_SCHEDULE_EXACT_ALARM) }) {
-                            Text("允许精确闹钟")
-                        }
-                        if (!batteryExempt) TextButton(onClick = { openSystemSettings(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS) }) {
-                            Text("允许后台运行（电池优化设置）")
-                        }
-                        if (!notificationsAllowed) TextButton(onClick = { requestNotifications.launch(Manifest.permission.POST_NOTIFICATIONS) }) {
-                            Text("允许任务通知")
-                        }
-                        Text("部分系统仍可能限制后台运行。任务最长运行一小时；可随时从任务页停止。",
-                            fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    }
+                    Text("诊断日志", fontSize = 28.sp, fontWeight = FontWeight.Bold)
                     SectionCard("诊断日志") {
                         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                             Text("记录诊断日志", Modifier.weight(1f))
@@ -146,41 +113,6 @@ class AppSettingsActivity : ComponentActivity() {
                             Text("关闭时不会写入任何内容。", fontSize = 12.sp,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant)
                         }
-                    }
-                    WaterUsageSettingsCard()
-                    SectionCard("检查更新") {
-                        Text(buildAnnotatedString {
-                            append("github仓库：")
-                            withStyle(SpanStyle(color = MaterialTheme.colorScheme.primary, textDecoration = TextDecoration.Underline)) {
-                                append(AppUpdates.REPOSITORY_URL.removePrefix("https://github.com/"))
-                            }
-                        }, modifier = Modifier.clickable { openUrl(AppUpdates.REPOSITORY_URL) })
-                        Text(update.message)
-                        Button(onClick = { updates.check(manual = true) }, enabled = !update.checking) { Text("检查更新") }
-                        update.available?.let { release ->
-                            Text(release.notes.ifBlank { "发布说明见 GitHub" }, fontSize = 13.sp)
-                            TextButton(onClick = { openUrl(release.url) }) { Text("查看 ${release.tag} 发布页") }
-                        }
-                        Text("自动检查频率", fontWeight = FontWeight.SemiBold)
-                        UpdatePolicy.entries.forEach { item ->
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                RadioButton(selected = policy == item, onClick = {
-                                    policy = item
-                                    AppUpdates.prefs(this@AppSettingsActivity).edit().putString("policy", item.name).apply()
-                                })
-                                Text(item.label)
-                            }
-                        }
-                        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                            Text("包含预发布版本", Modifier.weight(1f))
-                            Switch(checked = previews, onCheckedChange = {
-                                previews = it
-                                AppUpdates.prefs(this@AppSettingsActivity).edit().putBoolean("prereleases", it).apply()
-                                updates.check(manual = true)
-                            }, enabled = !update.checking)
-                        }
-                        Text("草稿和没有就绪 APK 的发布不会作为更新。", fontSize = 12.sp)
-                        TextButton(onClick = { openUrl("${AppUpdates.REPOSITORY_URL}/releases") }) { Text("查看全部发布") }
                     }
                 }
             }
