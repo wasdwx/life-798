@@ -17,16 +17,23 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import androidx.lifecycle.lifecycleScope
 import com.water.widget.ui.AccountCardState
 import com.water.widget.ui.AccountsScreen
 import com.water.widget.ui.TextEntryDialog
 import com.water.widget.ui.WaterTheme
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicInteger
+import kotlinx.coroutines.launch
 
 class AccountsActivity : ComponentActivity() {
     private var accounts by mutableStateOf<List<AccountCardState>>(emptyList())
     private var dialog by mutableStateOf<DialogState?>(null)
+    /** 每个 (手机号, 是否 App) 最近一次检测请求的 token 与状态，用于丢弃过期响应。 */
+    private data class CheckedLogin(val token: String, val status: TokenValidity)
+    private val loginStates = mutableMapOf<Pair<String, Boolean>, CheckedLogin>()
+    /** 手动导入请求代号：并发导入或期间账户被改动时，丢弃过期结果。 */
+    private val pendingImports = mutableMapOf<String, Any>()
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -45,16 +52,22 @@ class AccountsActivity : ComponentActivity() {
                     onSetCurrent = { AccountStore.setCurrent(this, it); refresh(); toast("已切换当前账户") },
                     onSetAppToken = { phone -> dialog = DialogState.SetAppToken(phone) },
                     onRevealToken = { phone, app -> dialog = DialogState.Reveal(phone, app) },
-                    onDelete = { phone -> dialog = DialogState.Delete(phone) }
+                    onDelete = { phone -> dialog = DialogState.Delete(phone) },
+                    onCheckLogin = { phone -> AccountStore.get(this, phone)?.let(::checkLogins) },
+                    onRelogin = { phone, app -> login.launch(LoginActivity.reloginIntent(this, phone, app)) }
                 )
                 RenderDialog()
             }
         }
+        // 登录态是内存态：检测结果变化时重绘卡片，进程重启即回「未检测」。
+        lifecycleScope.launch { LoginStatusStore.changes.collect { refresh() } }
     }
 
     override fun onResume() {
         super.onResume()
         refresh()
+        // 回到账户页时自动复核所有账户（只读请求，不会删除任何登录信息）。
+        AccountStore.list(this).forEach(::checkLogins)
     }
 
     @androidx.compose.runtime.Composable
@@ -62,11 +75,11 @@ class AccountsActivity : ComponentActivity() {
         when (val state = dialog) {
             DialogState.AddToken -> TextEntryDialog(
                 title = "手动添加登录信息",
-                message = "设备登录为必需项；积分登录可稍后补充。登录信息属于敏感内容，保存前会在线核验账户。",
+                message = "用水登录用于接水和钱包，积分登录可稍后补充。保存前会在线核验账户，登录信息属于敏感内容，请勿分享给他人。",
                 fields = listOf(
                     "手机号" to "",
-                    "积分登录（补充：支付宝端任务可获得更多积分）" to "",
-                    "设备登录（必需：设备、App 端任务与充值）" to ""
+                    "积分登录（支付宝，可选）" to "",
+                    "用水登录（App，必需）" to ""
                 ),
                 sensitive = true,
                 onDismiss = { dialog = null },
@@ -75,9 +88,9 @@ class AccountsActivity : ComponentActivity() {
             is DialogState.SetAppToken -> {
                 val account = AccountStore.get(this, state.phone)
                 TextEntryDialog(
-                    title = "手动填写设备登录",
-                    message = "设备登录为必需项，用于设备启动、App 端积分任务与钱包充值。",
-                    fields = listOf("设备登录" to account?.appToken.orEmpty()),
+                    title = "手动填写用水登录",
+                    message = "用水登录为必需项，用于设备启动、App 端积分任务与钱包充值。",
+                    fields = listOf("用水登录（App）" to account?.appToken.orEmpty()),
                     sensitive = true,
                     onDismiss = { dialog = null },
                     onConfirm = { values ->
@@ -93,7 +106,7 @@ class AccountsActivity : ComponentActivity() {
                 val token = if (state.app) account?.appToken.orEmpty() else account?.token.orEmpty()
                 AlertDialog(
                     onDismissRequest = { dialog = null },
-                    title = { Text(if (state.app) "设备登录" else "积分登录") },
+                    title = { Text(if (state.app) "用水登录信息" else "积分登录信息") },
                     text = { Text("这是一段敏感登录信息，请勿发送给他人或粘贴到不可信应用。\n\n$token") },
                     confirmButton = { TextButton(onClick = { copySensitive(token); dialog = null }) { Text("复制登录信息") } },
                     dismissButton = { TextButton(onClick = { dialog = null }) { Text("关闭") } }
@@ -119,11 +132,58 @@ class AccountsActivity : ComponentActivity() {
                 current = account.phone == current,
                 alipayToken = account.token.orEmpty(),
                 appToken = account.appToken.orEmpty(),
+                alipayStatus = LoginStatusStore.status(account, false),
+                appStatus = LoginStatusStore.status(account, true),
                 deviceSummary = account.rememberedDevices()
                     .takeIf { it.isNotEmpty() }
                     ?.let { "${it.size} 台设备" }
                     ?: "暂无设备"
             )
+        }
+    }
+
+    /**
+     * 只读复核一个账户的两条登录信息。
+     *
+     * 三条防陈旧规则，缺一不可：
+     *  1. 同一 (手机号, 平台) 只保留最后一次请求，过期响应直接丢弃；
+     *  2. 回调时重新从 AccountStore 读账户，避免用旧快照覆盖；
+     *  3. 当前 token 与发起请求时的 token 不同则丢弃（用户期间重新登录过）。
+     *
+     * 检测失败（网络错误 / json 为空）记 FAILED 而不是 EXPIRED：断网不等于登录失效。
+     */
+    private fun checkLogins(account: Account) {
+        listOf(false, true).forEach { app ->
+            val token = (if (app) account.appToken else account.token).orEmpty()
+            if (token.isBlank()) return@forEach
+            val key = account.phone to app
+            // 同一 token 正在检测中就不重复发请求。
+            if (loginStates[key]?.let { it.token == token && it.status == TokenValidity.CHECKING } == true) return@forEach
+            val checking = CheckedLogin(token, TokenValidity.CHECKING)
+            loginStates[key] = checking
+            LoginStatusStore.record(account, app, TokenValidity.CHECKING)
+            val callback = IlifeApi.JsonCallback { json, _ ->
+                runOnUiThread {
+                    if (loginStates[key] !== checking) return@runOnUiThread
+                    val current = AccountStore.get(this, account.phone) ?: return@runOnUiThread
+                    if ((if (app) current.appToken else current.token) != token) return@runOnUiThread
+                    val status = TokenValidity.from(json)
+                    loginStates[key] = CheckedLogin(token, status)
+                    LoginStatusStore.record(current, app, status)
+                }
+            }
+            if (app) {
+                // 用水登录：用 App 身份头只读查询账户信息。
+                IlifeApi.checkLoginStatus(
+                    token,
+                    TaskProtocol.appType(TaskPlatform.APP),
+                    TaskProtocol.version(TaskPlatform.APP),
+                    callback
+                )
+            } else {
+                // 积分登录：用小程序身份头读任务列表（积分侧没有单独的会话检查接口）。
+                IlifeApi.missionLstWithToken(token, TaskPlatform.MAIN, callback)
+            }
         }
     }
 
@@ -157,6 +217,16 @@ class AccountsActivity : ComponentActivity() {
             return
         }
 
+        // 先固定「这次导入针对哪个账户」，回调时用它判断期间有没有被别的操作改过。
+        val original = fixedAccount
+            ?: AccountStore.get(this, phone)
+            ?: AccountStore.list(this).firstOrNull { account ->
+                requested.keys.any { candidate -> candidate == account.token || candidate == account.appToken }
+            }
+        val requestKey = original?.phone ?: phone
+        val request = Any()
+        pendingImports[requestKey] = request
+
         toast("正在核验登录信息…")
         val inspected = ConcurrentHashMap<String, InspectedToken>()
         val remaining = AtomicInteger(requested.size)
@@ -165,13 +235,17 @@ class AccountsActivity : ComponentActivity() {
                 inspected[token] = TokenImportResolver.inspect(token, probe, err)
                 if (remaining.decrementAndGet() == 0) {
                     runOnUiThread {
-                        val existing = fixedAccount
-                            ?: AccountStore.get(this, phone)
-                            ?: AccountStore.list(this).firstOrNull { account ->
-                                requested.keys.any { candidate ->
-                                    candidate == account.token || candidate == account.appToken
-                                }
-                            }
+                        // 页面已关闭，或同一账户又发起了新的导入：丢弃这次结果。
+                        if (isDestroyed || isFinishing || pendingImports[requestKey] !== request) return@runOnUiThread
+                        pendingImports.remove(requestKey)
+                        val existing = AccountStore.get(this, requestKey)
+                        // 期间账户被删除、重新登录或换了登录信息：不要用旧探测结果覆盖新状态。
+                        if (original == null && existing != null || original != null &&
+                            (existing == null || existing.token != original.token || existing.appToken != original.appToken)
+                        ) {
+                            toastLong("账号或登录信息已变化，请重新检查后保存")
+                            return@runOnUiThread
+                        }
                         val candidates = requested.map { (candidateToken, platforms) ->
                             TokenImportCandidate(
                                 inspection = inspected.getValue(candidateToken),
@@ -203,10 +277,12 @@ class AccountsActivity : ComponentActivity() {
                         if (setCurrent) AccountStore.addOrUpdate(this, account)
                         else AccountStore.addOrUpdateKeepingCurrent(this, account)
                         refresh()
+                        // 刚写入的登录信息立刻复核一次，账户页马上能看到真实状态。
+                        checkLogins(account)
 
                         val details = buildList {
                             addAll(resolution.notices)
-                            if (resolution.appToken.isBlank()) add("仍需完成设备登录，才能使用设备")
+                            if (resolution.appToken.isBlank()) add("仍需完成用水登录，才能使用设备")
                             if (resolution.mainToken.isBlank()) add("可补充积分登录，获得更多积分")
                         }.distinct()
                         toastLong(

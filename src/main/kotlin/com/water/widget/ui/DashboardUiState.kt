@@ -1,6 +1,7 @@
 package com.water.widget.ui
 
 import com.water.widget.Account
+import com.water.widget.TokenValidity
 import com.water.widget.WaterEstimate
 import org.json.JSONObject
 import java.util.Calendar
@@ -16,7 +17,9 @@ data class DashboardSummaryUiState(
     val hasDevices: Boolean,
     val accountCount: Int,
     val devices: List<DeviceUiState> = emptyList(),
-    val usage: WaterUsageUiState = WaterUsageUiState()
+    val usage: WaterUsageUiState = WaterUsageUiState(),
+    /** 设备（用水）登录的检测结果文案，未检测过时回落为"已完成/未完成"。 */
+    val appLoginStatusText: String = "未完成"
 )
 
 data class DeviceUiState(
@@ -32,7 +35,9 @@ data class WaterUsageUiState(
     val todayWaterText: String = "--",
     val monthWaterText: String = "--",
     val yearWaterText: String = "--",
-    val showWaterEstimate: Boolean = true
+    val showWaterEstimate: Boolean = true,
+    /** 统计口径说明：哪些记录被计入。 */
+    val syncNote: String = "仅统计已获取的记录"
 )
 
 data class DashboardAccountUiState(
@@ -52,7 +57,10 @@ object DashboardUiStateFactory {
         scoreJson: JSONObject? = null,
         usageOverride: WaterUsageUiState? = null,
         walletBalance: Double? = null,
-        waterEstimate: WaterEstimate = WaterEstimate()
+        waterEstimate: WaterEstimate = WaterEstimate(),
+        walletMessage: String? = null,
+        appStatus: TokenValidity = TokenValidity.UNCHECKED,
+        alipayStatus: TokenValidity = TokenValidity.UNCHECKED
     ): DashboardSummaryUiState {
         if (account == null) {
             return DashboardSummaryUiState(
@@ -76,19 +84,14 @@ object DashboardUiStateFactory {
         val hasDevices = account.hasDevices()
         return DashboardSummaryUiState(
             accountTitle = title,
-            accountSubtitle = when {
-                account.hasToken() && hasAppToken -> "设备与积分登录均已完成"
-                account.hasToken() -> "积分登录已完成 · 设备登录未完成"
-                hasAppToken -> "设备登录已完成 · 可补充积分登录"
-                else -> "两项登录均未完成"
-            },
+            accountSubtitle = loginSummary(account, appStatus, alipayStatus),
             scoreTitle = if (validScore != null && walletBalance != null) {
                 "≈¥" + String.format(Locale.CHINA, "%.2f", validScore / 1000.0 + walletBalance)
             } else "--",
             scoreSubtitle = listOf(
                 walletBalance?.let { "钱包 ¥" + String.format(Locale.CHINA, "%.2f", it) } ?: "钱包未获取",
                 validScore?.let { "积分 $it（≈" + moneyText(it) + "）" } ?: "积分未获取"
-            ).joinToString("  +  "),
+            ).joinToString("  +  ") + walletMessage?.let { "\n$it" }.orEmpty(),
             hasAccount = true,
             hasAppToken = hasAppToken,
             hasDevices = hasDevices,
@@ -100,8 +103,43 @@ object DashboardUiStateFactory {
                     isControlCenterDevice = id == account.selectedDeviceId()
                 )
             },
-            usage = usageOverride ?: usageFrom(scoreJson, waterEstimate)
+            usage = usageOverride ?: usageFrom(scoreJson, waterEstimate),
+            appLoginStatusText = loginState(hasAppToken, appStatus)
         )
+    }
+
+    /** 有 token 但还没检测过时，沿用"已完成"的说法，避免把未检测说成异常。 */
+    private fun loginState(hasToken: Boolean, status: TokenValidity): String = when {
+        !hasToken -> "未完成"
+        status == TokenValidity.UNCHECKED || status == TokenValidity.CHECKING -> "已完成"
+        else -> status.label
+    }
+
+    private fun isChecked(status: TokenValidity): Boolean =
+        status != TokenValidity.UNCHECKED && status != TokenValidity.CHECKING
+
+    /**
+     * 账号副标题。两端都还没检测过时保持历史文案（"设备与积分登录均已完成"等），
+     * 一旦账户页检测出结果，再换成"设备登录有效 · 积分登录需重新验证"这种精确说法。
+     */
+    private fun loginSummary(
+        account: Account,
+        appStatus: TokenValidity,
+        alipayStatus: TokenValidity
+    ): String {
+        val hasApp = account.hasAppToken()
+        val hasAlipay = account.hasToken()
+        val checked = (hasApp && isChecked(appStatus)) || (hasAlipay && isChecked(alipayStatus))
+        if (!checked) {
+            return when {
+                hasAlipay && hasApp -> "设备与积分登录均已完成"
+                hasAlipay -> "积分登录已完成 · 设备登录未完成"
+                hasApp -> "设备登录已完成 · 可补充积分登录"
+                else -> "两项登录均未完成"
+            }
+        }
+        return "设备登录" + loginState(hasApp, appStatus) +
+            " · 积分登录" + loginState(hasAlipay, alipayStatus)
     }
 
     private fun usageFrom(
@@ -161,21 +199,18 @@ object DashboardUiStateFactory {
 
     private fun moneyText(score: Int): String = "¥${String.format(Locale.CHINA, "%.2f", score / 1000.0)}"
 
-    fun accountsFrom(accounts: List<Account>, currentPhone: String?): List<DashboardAccountUiState> =
+    fun accountsFrom(
+        accounts: List<Account>,
+        currentPhone: String?,
+        loginStatus: (Account, Boolean) -> TokenValidity = { _, _ -> TokenValidity.UNCHECKED }
+    ): List<DashboardAccountUiState> =
         accounts.map { account ->
+            val summary = loginSummary(account, loginStatus(account, true), loginStatus(account, false))
             DashboardAccountUiState(
                 phone = account.phone.orEmpty(),
                 title = account.name?.takeIf { it.isNotBlank() } ?: account.phone?.takeIf { it.isNotBlank() } ?: "未命名账号",
-                subtitle = when {
-                    account.hasToken() && account.hasAppToken() -> "设备与积分登录均已完成"
-                    account.hasToken() -> "积分登录已完成 · 设备登录未完成"
-                    account.hasAppToken() -> "设备登录已完成 · 可补充积分登录"
-                    else -> "需要重新登录或补充登录信息"
-                },
-                tokenSummary = buildList {
-                    add(if (account.hasToken()) "积分登录已完成" else "积分登录未完成")
-                    add(if (account.hasAppToken()) "设备登录已完成" else "设备登录未完成")
-                }.joinToString(" · "),
+                subtitle = summary,
+                tokenSummary = summary,
                 deviceSummary = if (account.hasDevices()) "${account.rememberedDevices().size} 台设备" else "暂无设备",
                 isCurrent = account.phone == currentPhone
             )

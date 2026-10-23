@@ -36,6 +36,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.water.widget.TokenValidity
 
 data class AccountCardState(
     val phone: String,
@@ -43,7 +44,10 @@ data class AccountCardState(
     val current: Boolean,
     val alipayToken: String,
     val appToken: String,
-    val deviceSummary: String
+    val deviceSummary: String,
+    /** 登录态检测结果，默认未检测；由 AccountsActivity 写入。 */
+    val alipayStatus: TokenValidity = TokenValidity.UNCHECKED,
+    val appStatus: TokenValidity = TokenValidity.UNCHECKED
 )
 
 @Composable
@@ -54,7 +58,9 @@ fun AccountsScreen(
     onSetCurrent: (String) -> Unit,
     onSetAppToken: (String) -> Unit,
     onRevealToken: (String, Boolean) -> Unit,
-    onDelete: (String) -> Unit
+    onDelete: (String) -> Unit,
+    onCheckLogin: (String) -> Unit = {},
+    onRelogin: (String, Boolean) -> Unit = { _, _ -> }
 ) {
     LazyColumn(
         modifier = Modifier
@@ -100,7 +106,7 @@ fun AccountsScreen(
                 )
             }
             items(accounts, key = { it.phone }) { account ->
-                AccountCard(account, onSetCurrent, onSetAppToken, onRevealToken, onDelete)
+                AccountCard(account, onSetCurrent, onSetAppToken, onRevealToken, onDelete, onCheckLogin, onRelogin)
             }
         }
     }
@@ -150,7 +156,9 @@ private fun AccountCard(
     onSetCurrent: (String) -> Unit,
     onSetAppToken: (String) -> Unit,
     onRevealToken: (String, Boolean) -> Unit,
-    onDelete: (String) -> Unit
+    onDelete: (String) -> Unit,
+    onCheckLogin: (String) -> Unit,
+    onRelogin: (String, Boolean) -> Unit
 ) {
     var expanded by remember { mutableStateOf(false) }
     Card(
@@ -179,8 +187,8 @@ private fun AccountCard(
                     )
                 }
             }
-            AccountInfoRow("积分登录（补充）", maskToken(account.alipayToken))
-            AccountInfoRow("设备登录（必需）", maskToken(account.appToken))
+            AccountInfoRow("积分登录（可选）", if (account.alipayToken.isNotBlank()) account.alipayStatus.label else "未登录")
+            AccountInfoRow("用水登录（必需）", if (account.appToken.isNotBlank()) account.appStatus.label else "未登录")
             AccountInfoRow("设备", account.deviceSummary)
             Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                 Button(onClick = { onSetCurrent(account.phone) }, enabled = !account.current, modifier = Modifier.weight(1f)) {
@@ -190,8 +198,15 @@ private fun AccountCard(
                     FilledTonalButton(onClick = { expanded = true }, modifier = Modifier.fillMaxWidth()) { Text("更多设置") }
                     DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
                         DropdownMenuItem(text = { Text("复制积分登录信息") }, enabled = account.alipayToken.isNotBlank(), onClick = { expanded = false; onRevealToken(account.phone, false) })
-                        DropdownMenuItem(text = { Text("复制设备登录信息") }, enabled = account.appToken.isNotBlank(), onClick = { expanded = false; onRevealToken(account.phone, true) })
-                        DropdownMenuItem(text = { Text("设置设备登录") }, onClick = { expanded = false; onSetAppToken(account.phone) })
+                        DropdownMenuItem(text = { Text("复制用水登录信息") }, enabled = account.appToken.isNotBlank(), onClick = { expanded = false; onRevealToken(account.phone, true) })
+                        DropdownMenuItem(text = { Text("设置用水登录") }, onClick = { expanded = false; onSetAppToken(account.phone) })
+                        DropdownMenuItem(
+                            text = { Text("检查登录状态") },
+                            enabled = account.appStatus != TokenValidity.CHECKING && account.alipayStatus != TokenValidity.CHECKING,
+                            onClick = { expanded = false; onCheckLogin(account.phone) }
+                        )
+                        DropdownMenuItem(text = { Text("重新登录用水账号") }, onClick = { expanded = false; onRelogin(account.phone, true) })
+                        DropdownMenuItem(text = { Text("重新登录积分账号") }, onClick = { expanded = false; onRelogin(account.phone, false) })
                         DropdownMenuItem(text = { Text("删除账户") }, onClick = { expanded = false; onDelete(account.phone) })
                     }
                 }

@@ -36,6 +36,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Surface
@@ -57,26 +58,39 @@ import com.alipay.sdk.app.PayTask
 import com.water.widget.ui.PullRefreshOffsetContent
 import com.water.widget.ui.WaterPullRefresh
 import com.water.widget.ui.WaterTheme
+import java.security.MessageDigest
 import java.util.Locale
 
 class WalletActivity : ComponentActivity() {
     private var state by mutableStateOf(WalletUiState())
     private var scoreGeneration = 0
+    private var walletGeneration = 0
     private var hasLoaded = false
     private var lastAccountKey = ""
     @Volatile private var destroyed = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        // 进程被回收后重建：同一账号保留待核验的充值订单，避免用户重复付款。
+        val accountKey = walletAccountKey(AccountStore.getCurrent(this))
+        if (savedInstanceState?.getString("rechargeAccountKey") == accountKey) {
+            lastAccountKey = accountKey
+            state = state.copy(pendingRechargeOrderId = savedInstanceState.getString("rechargeOrderId"))
+        }
         UI.applySystemBarAppearance(this, ThemeSettings.isDark(this))
         render()
+    }
+
+    override fun onSaveInstanceState(outState: Bundle) {
+        outState.putString("rechargeAccountKey", lastAccountKey)
+        outState.putString("rechargeOrderId", state.pendingRechargeOrderId)
+        super.onSaveInstanceState(outState)
     }
 
     override fun onResume() {
         super.onResume()
         val account = AccountStore.getCurrent(this)
-        val accountKey = "${account?.phone.orEmpty()}\u0000${account?.appToken.orEmpty()}"
-        if (!hasLoaded || accountKey != lastAccountKey) loadWallets()
+        if (!hasLoaded || walletAccountKey(account) != lastAccountKey) loadWallets()
     }
 
     override fun onDestroy() {
@@ -88,14 +102,21 @@ class WalletActivity : ComponentActivity() {
         hasLoaded = true
         val account = AccountStore.getCurrent(this)
         val appToken = account?.appToken.orEmpty()
-        lastAccountKey = "${account?.phone.orEmpty()}\u0000$appToken"
+        val accountKey = walletAccountKey(account)
+        val accountChanged = accountKey != lastAccountKey
+        lastAccountKey = accountKey
+        val generation = ++walletGeneration
         if (appToken.isBlank()) {
+            scoreGeneration++
             state = WalletUiState(
                 accountName = account?.displayName().orEmpty(),
                 missingAppToken = true
             )
             return
         }
+
+        // 换账号时整页重置，避免把上一个账号的余额/订单带到新账号上。
+        if (accountChanged) state = WalletUiState(accountName = account.displayName())
 
         state = state.copy(
             accountName = account.displayName(),
@@ -108,7 +129,17 @@ class WalletActivity : ComponentActivity() {
         refreshAvailableScore(appToken)
         IlifeApi.walletOwnerWithToken(appToken) { response, error ->
             runOnUiThread {
-                if (!canContinue()) return@runOnUiThread
+                if (!canContinue(generation)) return@runOnUiThread
+                // 登录态失效（业务码 -99）时直接提示重新验证，而不是当成普通网络错误。
+                TokenValidity.expiredMessage(response, true)?.let { message ->
+                    state = WalletUiState(
+                        accountName = account.displayName(),
+                        missingAppToken = true,
+                        errorMessage = message,
+                        pendingRechargeOrderId = state.pendingRechargeOrderId
+                    )
+                    return@runOnUiThread
+                }
                 if (response == null) {
                     showError(listOfNotNull(messageAfterRefresh, "加载钱包失败：${error ?: "网络错误"}").joinToString("；"))
                     return@runOnUiThread
@@ -142,7 +173,7 @@ class WalletActivity : ComponentActivity() {
                             statusMessage = messageAfterRefresh,
                             errorMessage = null
                         )
-                        loadProducts(appToken, selectedWallet, messageAfterRefresh)
+                        loadProducts(appToken, selectedWallet, generation, messageAfterRefresh)
                     }
                 } catch (e: IllegalArgumentException) {
                     showError(listOfNotNull(messageAfterRefresh, e.message ?: "钱包响应格式错误").joinToString("；"))
@@ -158,6 +189,7 @@ class WalletActivity : ComponentActivity() {
             state.products.isNotEmpty()
         ) return
         val appToken = AccountStore.getCurrent(this)?.appToken.orEmpty()
+        val generation = ++walletGeneration
         state = state.copy(
             selectedEndpointId = wallet.endpointId,
             selectedOwnerId = wallet.ownerId,
@@ -168,13 +200,18 @@ class WalletActivity : ComponentActivity() {
             statusMessage = null,
             errorMessage = null
         )
-        loadProducts(appToken, wallet)
+        loadProducts(appToken, wallet, generation)
     }
 
-    private fun loadProducts(appToken: String, wallet: RechargeWallet, resultMessage: String? = null) {
+    private fun loadProducts(
+        appToken: String,
+        wallet: RechargeWallet,
+        generation: Int,
+        resultMessage: String? = null
+    ) {
         IlifeApi.rechargeProductsWithToken(appToken, wallet.endpointId) { response, error ->
             runOnUiThread {
-                if (!canContinue()) return@runOnUiThread
+                if (!canContinue(generation)) return@runOnUiThread
                 if (response == null) {
                     showError(listOfNotNull(resultMessage, "加载充值金额失败：${error ?: "网络错误"}").joinToString("；"))
                     return@runOnUiThread
@@ -198,7 +235,10 @@ class WalletActivity : ComponentActivity() {
         state = state.copy(availableScore = null, scoreLoading = true, scoreError = null)
         IlifeApi.accountScoreWithToken(appToken) { response, _ ->
             runOnUiThread {
-                if (!canContinue() || generation != scoreGeneration) return@runOnUiThread
+                // 账号已切换（token 变了）时丢弃这次回包，避免串号。
+                if (!canContinue() || generation != scoreGeneration ||
+                    AccountStore.getCurrent(this)?.appToken != appToken
+                ) return@runOnUiThread
                 val score = try {
                     response?.let(ScoreExchangeParser::availableScore)
                 } catch (_: IllegalArgumentException) {
@@ -207,7 +247,8 @@ class WalletActivity : ComponentActivity() {
                 state = state.copy(
                     availableScore = score,
                     scoreLoading = false,
-                    scoreError = if (score == null) "可用积分加载失败，请下拉刷新后重试" else null
+                    scoreError = TokenValidity.expiredMessage(response, true)
+                        ?: if (score == null) "可用积分加载失败，请下拉刷新后重试" else null
                 )
             }
         }
@@ -224,19 +265,20 @@ class WalletActivity : ComponentActivity() {
         }
         val account = AccountStore.getCurrent(this) ?: return
         val appToken = account.appToken.orEmpty()
-        if ("${account.phone.orEmpty()}\u0000$appToken" != lastAccountKey) {
+        if (walletAccountKey(account) != lastAccountKey) {
             loadWallets("账户已变化，请重新选择兑换钱包")
             return
         }
+        val generation = walletGeneration
         val wallet = state.wallets.firstOrNull {
             it.endpointId == state.selectedEndpointId && it.ownerId == state.selectedOwnerId
         } ?: return
         state = state.copy(exchangeInProgress = true, exchangeMessage = "正在兑换并更新余额，请稍候…")
         IlifeApi.exchangeScoreWithToken(appToken, wallet.endpointId, score) { response, _ ->
             runOnUiThread {
-                if (!canContinue()) return@runOnUiThread
+                if (!canContinue(generation)) return@runOnUiThread
                 if (response != null && response.has("code") && response.optInt("code", -1) != 0) {
-                    refreshAfterExchange(appToken, "兑换未成功：${response.optString("msg", "请刷新后核对积分")}")
+                    refreshAfterExchange(appToken, "兑换未成功：${response.optString("msg", "请刷新后核对积分")}", generation)
                     return@runOnUiThread
                 }
                 val billId = try {
@@ -245,12 +287,12 @@ class WalletActivity : ComponentActivity() {
                     null
                 }
                 if (billId == null) {
-                    refreshAfterExchange(appToken, "兑换结果待确认，请先核对官方记录，勿重复兑换")
+                    refreshAfterExchange(appToken, "兑换结果待确认，请先核对官方记录，勿重复兑换", generation)
                     return@runOnUiThread
                 }
                 IlifeApi.billViewFullWithToken(appToken, billId) { billResponse, _ ->
                     runOnUiThread {
-                        if (!canContinue()) return@runOnUiThread
+                        if (!canContinue(generation)) return@runOnUiThread
                         val completed = try {
                             billResponse?.let { ScoreExchangeParser.isCompleted(it, billId) } == true
                         } catch (_: IllegalArgumentException) {
@@ -258,7 +300,8 @@ class WalletActivity : ComponentActivity() {
                         }
                         refreshAfterExchange(appToken,
                             if (completed) "兑换已完成，¥${(score / 1000.0).money()} 已兑换至「${wallet.name}」"
-                            else "兑换结果待确认，请先核对官方记录，勿重复兑换"
+                            else "兑换结果待确认，请先核对官方记录，勿重复兑换",
+                            generation
                         )
                     }
                 }
@@ -267,11 +310,11 @@ class WalletActivity : ComponentActivity() {
     }
 
     /** 兑换只更新余额和积分，不重载充值产品，也不改变页面加载布局。 */
-    private fun refreshAfterExchange(appToken: String, message: String) {
+    private fun refreshAfterExchange(appToken: String, message: String, generation: Int) {
         IlifeApi.walletOwnerWithToken(appToken) { walletResponse, _ ->
             IlifeApi.accountScoreWithToken(appToken) { scoreResponse, _ ->
                 runOnUiThread {
-                    if (!canContinue()) return@runOnUiThread
+                    if (!canContinue(generation)) return@runOnUiThread
                     val wallets = try {
                         walletResponse?.let(WalletResponseParser::parseWallets)
                     } catch (_: IllegalArgumentException) {
@@ -296,12 +339,19 @@ class WalletActivity : ComponentActivity() {
     }
 
     private fun startRecharge() {
+        // 有未核验的订单时禁止再下单，否则可能付两次钱。
+        if (state.loading || state.exchangeInProgress || state.pendingRechargeOrderId != null) return
         val account = AccountStore.getCurrent(this) ?: return
         val appToken = account.appToken.orEmpty()
+        if (walletAccountKey(account) != lastAccountKey) {
+            loadWallets("账号已变化，请重新选择充值钱包")
+            return
+        }
         val wallet = state.wallets.firstOrNull {
             it.endpointId == state.selectedEndpointId && it.ownerId == state.selectedOwnerId
         } ?: return
         val product = state.products.firstOrNull { it.id == state.selectedProductId } ?: return
+        val generation = walletGeneration
         state = state.copy(loading = true, refreshing = false, statusMessage = "正在创建充值订单…", errorMessage = null)
         IlifeApi.createRechargeOrderWithToken(
             appToken,
@@ -310,13 +360,13 @@ class WalletActivity : ComponentActivity() {
             product.id
         ) { response, error ->
             runOnUiThread {
-                if (!canContinue()) return@runOnUiThread
+                if (!canContinue(generation)) return@runOnUiThread
                 if (response == null) {
                     showError("创建充值订单失败：${error ?: "网络错误"}")
                     return@runOnUiThread
                 }
                 try {
-                    requestAlipay(appToken, WalletResponseParser.parseOrderId(response))
+                    requestAlipay(appToken, WalletResponseParser.parseOrderId(response), generation)
                 } catch (e: IllegalArgumentException) {
                     showError(e.message ?: "创建充值订单失败")
                 }
@@ -324,17 +374,20 @@ class WalletActivity : ComponentActivity() {
         }
     }
 
-    private fun requestAlipay(appToken: String, orderId: String) {
+    private fun requestAlipay(appToken: String, orderId: String, generation: Int) {
         state = state.copy(statusMessage = "正在打开支付宝…")
         IlifeApi.prepayAlipayWithToken(appToken, orderId) { response, error ->
             runOnUiThread {
-                if (!canContinue()) return@runOnUiThread
+                if (!canContinue(generation)) return@runOnUiThread
                 if (response == null) {
                     showError("发起支付宝支付失败：${error ?: "网络错误"}")
                     return@runOnUiThread
                 }
                 try {
-                    launchAlipay(WalletResponseParser.parsePaymentString(response))
+                    val paymentString = WalletResponseParser.parsePaymentString(response)
+                    // 拉起支付宝前先记住订单号：进程被杀或用户切走后，仍能回来核对这一单。
+                    state = state.copy(pendingRechargeOrderId = orderId)
+                    launchAlipay(appToken, orderId, paymentString, generation)
                 } catch (e: IllegalArgumentException) {
                     showError(e.message ?: "发起支付宝支付失败")
                 }
@@ -342,31 +395,79 @@ class WalletActivity : ComponentActivity() {
         }
     }
 
-    private fun launchAlipay(paymentString: String) {
+    private fun launchAlipay(appToken: String, orderId: String, paymentString: String, generation: Int) {
         Thread {
             if (!canContinue()) return@Thread
             val result = try {
                 AlipayResultParser.parse(PayTask(this).payV2(paymentString, true))
             } catch (e: Exception) {
-                AlipayResult(AlipayResultKind.FAILED, "支付失败：${e.message ?: "支付宝调用异常"}")
+                // 支付宝抛异常不代表没付成功，按"结果未知"处理并去服务端核对。
+                AlipayResult(AlipayResultKind.PROCESSING, "未能确认支付结果，请查询充值订单")
             }
             runOnUiThread {
-                if (!canContinue()) return@runOnUiThread
+                if (!canContinue(generation)) return@runOnUiThread
                 when (result.kind) {
-                    AlipayResultKind.SUCCESS -> loadWallets("充值成功，余额已刷新")
-                    AlipayResultKind.PROCESSING,
+                    AlipayResultKind.SUCCESS,
+                    AlipayResultKind.PROCESSING -> checkRecharge(appToken, orderId, generation)
                     AlipayResultKind.CANCELLED -> {
                         state = state.copy(
                             loading = false,
                             refreshing = false,
+                            pendingRechargeOrderId = null,
                             statusMessage = result.message,
                             errorMessage = null
                         )
                     }
-                    AlipayResultKind.FAILED -> showError(result.message)
+                    AlipayResultKind.FAILED -> {
+                        state = state.copy(pendingRechargeOrderId = null)
+                        showError(result.message)
+                    }
                 }
             }
         }.start()
+    }
+
+    /** 用户手动查询上一次充值的结果（例如付完款后 App 被系统回收）。 */
+    private fun checkRecharge() {
+        if (state.loading || state.exchangeInProgress) return
+        val orderId = state.pendingRechargeOrderId ?: return
+        val account = AccountStore.getCurrent(this) ?: return
+        if (walletAccountKey(account) != lastAccountKey) {
+            loadWallets("账号已变化，请核对当前账号的充值记录")
+            return
+        }
+        checkRecharge(account.appToken.orEmpty(), orderId, walletGeneration)
+    }
+
+    private fun checkRecharge(appToken: String, orderId: String, generation: Int) {
+        state = state.copy(loading = true, statusMessage = "正在查询充值订单…", errorMessage = null)
+        IlifeApi.billViewFullWithToken(appToken, orderId) { response, error ->
+            runOnUiThread {
+                if (!canContinue(generation)) return@runOnUiThread
+                val status = try {
+                    requireNotNull(response) { "查询充值订单失败：${error ?: "网络错误"}" }
+                    WalletResponseParser.rechargeStatus(response, orderId)
+                } catch (e: IllegalArgumentException) {
+                    showError(e.message ?: "查询充值订单失败，请稍后重试")
+                    return@runOnUiThread
+                }
+                when (status) {
+                    3 -> {
+                        state = state.copy(pendingRechargeOrderId = null)
+                        loadWallets("充值订单已付款")
+                    }
+                    4, 9 -> state = state.copy(
+                        pendingRechargeOrderId = null,
+                        loading = false,
+                        statusMessage = if (status == 4) "充值订单付款失败" else "充值订单已取消"
+                    )
+                    else -> state = state.copy(
+                        loading = false,
+                        statusMessage = "充值订单尚未确认付款，请稍后查询；如已付款，请勿重复充值"
+                    )
+                }
+            }
+        }
     }
 
     private fun showError(message: String) {
@@ -374,6 +475,13 @@ class WalletActivity : ComponentActivity() {
     }
 
     private fun canContinue(): Boolean = !destroyed && !isFinishing
+
+    /** 回包时同时校验代数与当前账号，避免切换账号后旧请求把数据写到新账号上。 */
+    private fun canContinue(generation: Int): Boolean {
+        val account = AccountStore.getCurrent(this)
+        return canContinue() && generation == walletGeneration &&
+            lastAccountKey == walletAccountKey(account)
+    }
 
     private fun render() {
         setContent {
@@ -399,14 +507,15 @@ class WalletActivity : ComponentActivity() {
                     onConfirmRecharge = {
                         state = state.copy(showRechargeConfirmation = false)
                         startRecharge()
-                    }
+                    },
+                    onCheckRecharge = ::checkRecharge
                 )
             }
         }
     }
 }
 
-private data class WalletUiState(
+internal data class WalletUiState(
     val accountName: String = "",
     val missingAppToken: Boolean = false,
     val loading: Boolean = false,
@@ -423,16 +532,25 @@ private data class WalletUiState(
     val exchangeInProgress: Boolean = false,
     val exchangeMessage: String = "选择档位后可调整兑换份数",
     val showRechargeConfirmation: Boolean = false,
+    val pendingRechargeOrderId: String? = null,
     val statusMessage: String? = null,
     val errorMessage: String? = null
 )
+
+/** 账号指纹：手机号 + 设备 token 的摘要，用于判断"当前页面加载的账号是否还是同一个"。 */
+private fun walletAccountKey(account: Account?): String {
+    val tokenHash = MessageDigest.getInstance("SHA-256")
+        .digest(account?.appToken.orEmpty().toByteArray(Charsets.UTF_8))
+        .joinToString("") { "%02x".format(it) }
+    return "${account?.phone.orEmpty()}\u0000$tokenHash"
+}
 
 private fun Account.displayName(): String = name?.takeIf { it.isNotBlank() }
     ?: phone?.takeIf { it.isNotBlank() }
     ?: "当前账户"
 
 @Composable
-private fun WalletScreen(
+internal fun WalletScreen(
     state: WalletUiState,
     onBack: () -> Unit,
     onOpenAccounts: () -> Unit,
@@ -444,7 +562,8 @@ private fun WalletScreen(
     onConfirmRecharge: () -> Unit,
     onRequestExchange: (Int) -> Unit,
     onDismissExchange: () -> Unit,
-    onConfirmExchange: (Int) -> Unit
+    onConfirmExchange: (Int) -> Unit,
+    onCheckRecharge: () -> Unit = {}
 ) {
     val indicatorTopOffset = WindowInsets.statusBars.asPaddingValues().calculateTopPadding() + 72.dp
     Surface(
@@ -516,6 +635,19 @@ private fun WalletScreen(
                     item {
                         PullRefreshOffsetContent(pullOffset) {
                             MessageCard(message, error = false)
+                        }
+                    }
+                }
+
+                // 上一次充值还没确认结果时，给一个显式入口去服务端核对，避免用户重复下单。
+                if (state.pendingRechargeOrderId != null) {
+                    item {
+                        PullRefreshOffsetContent(pullOffset) {
+                            OutlinedButton(
+                                onClick = onCheckRecharge,
+                                enabled = !state.loading && !state.exchangeInProgress,
+                                modifier = Modifier.fillMaxWidth()
+                            ) { Text("查询本次充值结果") }
                         }
                     }
                 }
@@ -640,7 +772,8 @@ private fun WalletScreen(
                         PullRefreshOffsetContent(pullOffset) {
                             Button(
                                 onClick = onRequestRecharge,
-                                enabled = !state.loading && !state.exchangeInProgress && selectedProduct != null,
+                                enabled = !state.loading && !state.exchangeInProgress && selectedProduct != null &&
+                                    state.pendingRechargeOrderId == null,
                                 modifier = Modifier.fillMaxWidth(),
                                 contentPadding = PaddingValues(vertical = 16.dp)
                             ) {
@@ -735,7 +868,11 @@ private fun WalletScreen(
                     }
                 },
                 confirmButton = {
-                    Button(onClick = onConfirmRecharge) { Text("确认并前往支付宝") }
+                    Button(
+                        onClick = onConfirmRecharge,
+                        enabled = !state.loading && !state.exchangeInProgress &&
+                            state.pendingRechargeOrderId == null
+                    ) { Text("确认并前往支付宝") }
                 },
                 dismissButton = {
                     TextButton(onClick = onDismissRecharge) { Text("取消") }

@@ -18,7 +18,10 @@ data class ScoreUiState(
     val message: String,
     val bills: List<WaterBillLogUiState> = emptyList(),
     val billLoading: Boolean = false,
-    val billMessage: String = ""
+    val billMessage: String = "",
+    /** 已加载到第几页（服务端从 0 开始）；-1 表示还没加载过。 */
+    val billPage: Int = -1,
+    val hasMoreBills: Boolean = false
 )
 
 data class ScoreLogUiState(

@@ -28,13 +28,14 @@ class TaskLogFormatterTest {
     @Test
     fun keepsMissionResultsAndFinalSummaries() {
         assertNull(TaskLogFormatter.format("[1/8] [APP] 浏览任务 +10分"))
+        // 日志按账号分卡片展示后，账号前缀保留在行内。
         assertEquals(
-            "[APP] 浏览任务 +10分",
+            "[测试账号] [APP] 浏览任务 +10分",
             TaskLogFormatter.format("[测试账号] [APP] 浏览任务：成功 +10分")
         )
         assertEquals("✅ 已提交 +10分", TaskLogFormatter.format("✅ 已提交 +10分"))
         assertEquals(
-            "测试账号：完成 · 获得 80 分",
+            "[测试账号] 完成 · 获得 80 分",
             TaskLogFormatter.format("[测试账号] 本账号预计获得 80 分")
         )
         assertEquals(
@@ -52,18 +53,19 @@ class TaskLogFormatterTest {
     }
 
     @Test
-    fun aggregatesSameTaskAcrossAccounts() {
+    fun keepsEachAccountLineSeparate() {
         val first = TaskLogFormatter.append(emptyList(), "[账号甲] 签到成功 +5分")
         val second = TaskLogFormatter.append(first, "[账号乙] 签到成功 +5分")
 
+        // 不再跨账号合并：每个账号单独一行，由界面按账号分组展示。
         assertEquals(
-            listOf("签到成功 +10分（5分 × 2）"),
+            listOf("[账号甲] 签到成功 +5分", "[账号乙] 签到成功 +5分"),
             second
         )
     }
 
     @Test
-    fun aggregatesMissionRoundsAndAccountsWithoutMixingTasks() {
+    fun aggregatesMissionRoundsWithinOneAccount() {
         var logs = emptyList<String>()
         logs = TaskLogFormatter.append(logs, "[账号甲] [APP] 浏览任务 (1/2)：成功 +10分")
         logs = TaskLogFormatter.append(logs, "[账号甲] [APP] 浏览任务 (2/2)：成功 +10分")
@@ -72,8 +74,9 @@ class TaskLogFormatterTest {
 
         assertEquals(
             listOf(
-                "[APP] 浏览任务 +30分（10分 × 3）",
-                "[支付宝] 浏览任务 +10分"
+                "[账号甲] [APP] 浏览任务 +20分（10分 × 2）",
+                "[账号乙] [APP] 浏览任务 +10分",
+                "[账号乙] [支付宝] 浏览任务 +10分"
             ),
             logs
         )

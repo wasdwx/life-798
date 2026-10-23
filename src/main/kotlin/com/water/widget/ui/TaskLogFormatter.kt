@@ -4,7 +4,20 @@ package com.water.widget.ui
  * 将执行层的诊断信息转换成适合直接展示给用户的运行记录。
  * 调度、并发和 Token 复用策略仍由执行层负责，但不占用界面日志空间。
  */
+data class TaskLogGroup(val account: String?, val lines: List<String>)
+
 object TaskLogFormatter {
+    fun readableText(message: String): String = message
+        .replace("核验累计积分变化", "正在确认积分到账")
+        .replace("无可用 Token", "尚未登录")
+        .replace("已核验新增", "已确认增加")
+        .replace("已核验增加", "已确认增加")
+        .replace("此前已核验积分", "此前已确认的积分")
+        .replace("到账核验失败", "暂时无法确认到账")
+        .replace("到账待核验", "等待确认到账")
+        .replace("重试仍受限", "再次尝试仍被拒绝")
+
+    private val accountPrefix = Regex("""^\[(.+?)]\s+(.+)$""")
     private val accountHeader = Regex("""^-+\s*\[(.+?)]\s+通道.+?-+$""")
     private val accountResult = Regex("""^\[(.+?)]\s+本账号(?:预计)?获得\s+(\d+)\s+分$""")
     private val allDone = Regex("""^=+\s*全部完成，本次(?:预计)?获得\s+(\d+)\s+分\s*=+$""")
@@ -25,6 +38,8 @@ object TaskLogFormatter {
         val line = raw.trim()
         if (line.isBlank()) return null
 
+        if (line.contains("已核验增加")) return line.trim('=').trim()
+
         successRecord(line)?.let {
             return renderSuccess(it, 1)
         }
@@ -32,7 +47,7 @@ object TaskLogFormatter {
             return "正在处理：${it.groupValues[1]}"
         }
         accountResult.matchEntire(line)?.let {
-            return "${it.groupValues[1]}：完成 · 获得 ${it.groupValues[2]} 分"
+            return "[${it.groupValues[1]}] 完成 · 获得 ${it.groupValues[2]} 分"
         }
         allDone.matchEntire(line)?.let {
             return "全部完成 · 本次获得 ${it.groupValues[1]} 分"
@@ -74,20 +89,38 @@ object TaskLogFormatter {
         return updated.takeLast(maxEntries.coerceAtLeast(1))
     }
 
+    fun groupByAccount(logs: List<String>): List<TaskLogGroup> {
+        val groups = linkedMapOf<String?, MutableList<String>>()
+        logs.forEach { line ->
+            val prefix = accountPrefix.matchEntire(line)
+            val account = if (line.startsWith("正在处理：")) line.removePrefix("正在处理：")
+                else prefix?.groupValues?.get(1)
+            val message = if (line.startsWith("正在处理：")) "开始处理"
+                else prefix?.groupValues?.get(2) ?: line
+            groups.getOrPut(account) { mutableListOf() }.add(message)
+        }
+        return groups.entries.sortedBy { it.key.orEmpty() }.map { (account, lines) ->
+            TaskLogGroup(account, lines.asReversed())
+        }
+    }
+
+    fun isFailure(line: String): Boolean = line.contains("❌") || line.contains("失败") ||
+        line.contains("错误") || line.contains("部分未完成") || line.contains("重试仍受限")
+
     private fun successRecord(line: String): SuccessRecord? {
         signInSuccess.matchEntire(line)?.let {
-            return SuccessRecord(label = "签到成功", unitScore = it.groupValues[2].toInt())
+            return SuccessRecord(label = "[${it.groupValues[1]}] 签到成功", unitScore = it.groupValues[2].toInt())
         }
         signInReward.matchEntire(line)?.let {
             return SuccessRecord(
-                label = "连签奖励${it.groupValues[3]}",
+                label = "[${it.groupValues[1]}] 连签奖励${it.groupValues[3]}",
                 unitScore = it.groupValues[2].toInt()
             )
         }
         missionSuccess.matchEntire(line)?.let {
             val taskName = it.groupValues[3].replace(missionRound, "")
             return SuccessRecord(
-                label = "${it.groupValues[2]} $taskName",
+                label = "[${it.groupValues[1]}] ${it.groupValues[2]} $taskName",
                 unitScore = it.groupValues[4].toInt()
             )
         }

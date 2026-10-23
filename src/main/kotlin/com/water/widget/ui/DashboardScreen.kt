@@ -79,6 +79,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -341,7 +342,7 @@ private fun HeroCard(state: DashboardSummaryUiState, onSwitchAccount: () -> Unit
                     Text("账号", color = contentColor.copy(alpha = 0.70f), fontSize = 12.sp)
                     Text(state.accountTitle, color = contentColor, fontSize = 20.sp, fontWeight = FontWeight.Bold, maxLines = 1)
                     if (state.hasAccount) {
-                        Text(state.accountSubtitle, color = contentColor.copy(alpha = 0.66f), fontSize = 11.sp, maxLines = 1)
+                        Text(state.accountSubtitle, color = contentColor.copy(alpha = 0.66f), fontSize = 11.sp)
                     }
                 }
                 Surface(
@@ -686,7 +687,7 @@ private fun MineTab(
     InfoCard(title = state.accountTitle, subtitle = state.accountSubtitle) {
         StatusRow("账号数量", "${state.accountCount}")
         StatusRow("可用额度", state.scoreTitle)
-        StatusRow("设备登录（必需）", if (state.hasAppToken) "已完成" else "未完成")
+        StatusRow("设备登录（必需）", state.appLoginStatusText)
         Spacer(Modifier.height(12.dp))
         Row(horizontalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.fillMaxWidth()) {
             Button(onClick = onLogin, modifier = Modifier.weight(1f), shape = RoundedCornerShape(16.dp)) { Text("登录") }
@@ -728,12 +729,22 @@ private fun MineTab(
 
 @Composable
 private fun PersonalUsageSummary(usage: WaterUsageUiState) {
-    InfoCard(title = "消费统计", subtitle = "") {
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
-            val water = { text: String -> if (usage.showWaterEstimate) text else "" }
-            UsageSummaryItem("今日", usage.todayCostText, water(usage.todayWaterText), Modifier.weight(1f))
-            UsageSummaryItem("本月", usage.monthCostText, water(usage.monthWaterText), Modifier.weight(1f))
-            UsageSummaryItem("本年", usage.yearCostText, water(usage.yearWaterText), Modifier.weight(1f))
+    // 系统字体放大时三列会挤成竖排单字，改为上下三行。
+    val largeText = LocalDensity.current.fontScale >= 1.3f
+    val water = { text: String -> if (usage.showWaterEstimate) text else "" }
+    InfoCard(title = "消费统计", subtitle = usage.syncNote) {
+        if (largeText) {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+                UsageSummaryItem("今日", usage.todayCostText, water(usage.todayWaterText), Modifier.fillMaxWidth())
+                UsageSummaryItem("本月", usage.monthCostText, water(usage.monthWaterText), Modifier.fillMaxWidth())
+                UsageSummaryItem("本年", usage.yearCostText, water(usage.yearWaterText), Modifier.fillMaxWidth())
+            }
+        } else {
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+                UsageSummaryItem("今日", usage.todayCostText, water(usage.todayWaterText), Modifier.weight(1f))
+                UsageSummaryItem("本月", usage.monthCostText, water(usage.monthWaterText), Modifier.weight(1f))
+                UsageSummaryItem("本年", usage.yearCostText, water(usage.yearWaterText), Modifier.weight(1f))
+            }
         }
     }
 }

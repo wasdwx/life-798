@@ -94,6 +94,19 @@ object WalletResponseParser {
     fun parsePaymentString(response: JSONObject): String =
         successDataString(response, "支付响应缺少支付参数")
 
+    /**
+     * 从账单详情里读充值订单状态。
+     * 1/2/5 = 未确认，3 = 已付款，4 = 付款失败，9 = 已取消。
+     */
+    fun rechargeStatus(response: JSONObject, orderId: String): Int {
+        val bill = (successData(response) as? JSONObject)?.optJSONObject("bill")
+            ?: throw IllegalArgumentException("充值订单暂不可用，请稍后查询")
+        require(bill.optString("id") == orderId) { "充值订单不匹配，请重新查询" }
+        val status = bill.optInt("status", -1)
+        require(status in listOf(1, 2, 3, 4, 5, 9)) { "充值订单状态暂不可用，请稍后查询" }
+        return status
+    }
+
     private fun parseWallet(wallet: JSONObject): RechargeWallet {
         val endpoint = wallet.optJSONObject("ep")
             ?: throw IllegalArgumentException("钱包缺少端点信息")

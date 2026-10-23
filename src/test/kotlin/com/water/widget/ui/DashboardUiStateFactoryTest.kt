@@ -134,7 +134,7 @@ class DashboardUiStateFactoryTest {
         assertEquals(2, states.size)
         assertTrue(states[0].isCurrent)
         assertEquals("设备与积分登录均已完成", states[0].subtitle)
-        assertEquals("积分登录已完成 · 设备登录已完成", states[0].tokenSummary)
+        assertEquals("设备与积分登录均已完成", states[0].tokenSummary)
         assertEquals("1 台设备", states[0].deviceSummary)
         assertFalse(states[1].isCurrent)
         assertEquals("设备登录已完成 · 可补充积分登录", states[1].subtitle)

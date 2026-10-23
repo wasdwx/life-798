@@ -13,8 +13,12 @@ import com.water.widget.ui.WaterBillLogParser
 import com.water.widget.ui.WaterBillLogUiState
 import com.water.widget.ui.WaterTheme
 
+/** 账单接口每页固定 20 条：返回满一页就认为可能还有下一页。 */
+private const val BILL_PAGE_SIZE = 20
+
 /**
  * 积分与消费记录：按账号展示当前积分、积分流水与接水消费账单。
+ * 接水账单按页拉取，滚动到底部再取下一页。
  */
 class ScoreActivity : ComponentActivity() {
     private var states by mutableStateOf<List<ScoreUiState>>(emptyList())
@@ -31,11 +35,17 @@ class ScoreActivity : ComponentActivity() {
     private fun refreshScores() {
         val generation = ++refreshGeneration
         accounts = AccountStore.list(this).filter { it.hasToken() || it.hasAppToken() }
-        states = accounts.map { ScoreUiStateFactory.loading(it).copy(billLoading = it.hasAppToken()) }
+        states = accounts.map { account ->
+            if (account.hasAppToken()) {
+                ScoreUiStateFactory.loading(account).copy(billLoading = true)
+            } else {
+                ScoreUiStateFactory.loading(account).copy(billMessage = "需要设备登录信息才能查看接水记录")
+            }
+        }
 
         accounts.forEachIndexed { index, account ->
             loadAccountScore(generation, index, account)
-            loadBills(generation, index, account)
+            if (account.hasAppToken()) loadBillPage(index, generation, 0)
         }
     }
 
@@ -51,15 +61,18 @@ class ScoreActivity : ComponentActivity() {
             IlifeApi.scoreLstWithToken(token) { scoreJson, scoreErr ->
                 runOnUiThread {
                     if (generation != refreshGeneration || isDestroyed) return@runOnUiThread
-                    val error = missionErr ?: scoreErr
+                    // 登录态失效（业务码 -99）不再直接清 token：只提示，并把结果记进共享登录状态。
+                    val loginError = TokenValidity.expiredMessage(missionJson, !account.hasToken())
+                        ?: TokenValidity.expiredMessage(scoreJson, !account.hasToken())
+                    val error = loginError ?: missionErr ?: scoreErr
                     val state = ScoreUiStateFactory.from(account, missionJson, scoreJson, error)
                     if (state.isReady && state.validScore >= 0 && state.validScore != account.score) {
                         // 顺手缓存，供桌面小部件离线展示（AccountStore 落盘时会通知小部件刷新）
                         AccountStore.updateScore(this, account.phone, token, state.validScore)
                     }
-                    if (missionJson?.optInt("code", -999) == -99) {
-                        // 先复核再判定（见 AuthGuard）
-                        AuthGuard.handleAuthFailure(this, account.phone, platform, token, "score")
+                    val validity = TokenValidity.from(missionJson ?: scoreJson)
+                    if (validity == TokenValidity.VALID || validity == TokenValidity.EXPIRED) {
+                        LoginStatusStore.record(account, !account.hasToken(), validity)
                     }
                     updateScore(generation, index, state)
                 }
@@ -67,29 +80,37 @@ class ScoreActivity : ComponentActivity() {
         }
     }
 
-    /** 账单只能用设备登录信息查询。 */
-    private fun loadBills(generation: Int, index: Int, account: Account) {
-        val appToken = account.appToken
-        if (appToken.isNullOrBlank()) {
-            update(generation, index) { it.copy(billMessage = "需要设备登录信息才能查看接水记录") }
-            return
-        }
-        IlifeApi.billListWithToken(appToken) { json, _ ->
-            val result = runCatching { WaterBillLogParser.list(json) }
+    /** 账单只能用设备登录信息查询；按页拉取，避免一次把全部账单塞进内存。 */
+    private fun loadBillPage(index: Int, generation: Int, page: Int) {
+        val appToken = accounts.getOrNull(index)?.appToken?.takeIf { it.isNotBlank() } ?: return
+        update(generation, index) { it.copy(billLoading = true) }
+        IlifeApi.billListWithToken(appToken, page) { json, err ->
+            val result = runCatching {
+                TokenValidity.expiredMessage(json, true)?.let { throw IllegalStateException(it) }
+                if (err != null) throw IllegalStateException("接水记录获取失败，请重试")
+                WaterBillLogParser.list(json)
+            }
+            val hasMore = (json?.optJSONArray("data")?.length() ?: 0) >= BILL_PAGE_SIZE
             runOnUiThread {
                 update(generation, index) { old ->
                     result.fold(
-                        { bills ->
+                        { records ->
+                            val bills = (old.bills + records).distinctBy { it.id }
                             old.copy(
                                 bills = bills,
                                 billLoading = false,
-                                billMessage = if (bills.isEmpty()) "最近账单中暂无已完成的接水记录"
-                                else "来自最近 20 笔账单，不含充值、兑换"
+                                billPage = page,
+                                hasMoreBills = hasMore,
+                                billMessage = when {
+                                    bills.isEmpty() && !hasMore -> "暂无已完成的接水记录"
+                                    bills.isEmpty() -> "已读取的账单中暂无接水消费，可继续加载"
+                                    hasMore -> "已加载 ${page + 1} 页账单 · 仅显示接水消费"
+                                    else -> "已加载全部可查询账单 · 仅显示接水消费"
+                                }
                             )
                         },
                         { e ->
                             old.copy(
-                                bills = emptyList(),
                                 billLoading = false,
                                 billMessage = e.message ?: "接水记录获取失败，请下拉重试"
                             )
@@ -98,6 +119,12 @@ class ScoreActivity : ComponentActivity() {
                 }
             }
         }
+    }
+
+    private fun loadMoreBills(index: Int) {
+        val current = states.getOrNull(index) ?: return
+        if (current.billLoading || !current.hasMoreBills) return
+        loadBillPage(index, refreshGeneration, current.billPage + 1)
     }
 
     private fun loadBillPayment(index: Int, billId: String) {
@@ -120,7 +147,13 @@ class ScoreActivity : ComponentActivity() {
     /** 积分那一路整份替换，但保留另一路已加载的账单。 */
     private fun updateScore(generation: Int, index: Int, state: ScoreUiState) =
         update(generation, index) { old ->
-            state.copy(bills = old.bills, billLoading = old.billLoading, billMessage = old.billMessage)
+            state.copy(
+                bills = old.bills,
+                billLoading = old.billLoading,
+                billMessage = old.billMessage,
+                billPage = old.billPage,
+                hasMoreBills = old.hasMoreBills
+            )
         }
 
     private fun updateBill(
@@ -149,7 +182,8 @@ class ScoreActivity : ComponentActivity() {
                     states = states,
                     refreshing = refreshing,
                     onRefresh = ::refreshScores,
-                    onLoadBillPayment = ::loadBillPayment
+                    onLoadBillPayment = ::loadBillPayment,
+                    onLoadMoreBills = ::loadMoreBills
                 )
             }
         }

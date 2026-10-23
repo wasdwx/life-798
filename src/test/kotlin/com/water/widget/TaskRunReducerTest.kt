@@ -23,12 +23,16 @@ class TaskRunReducerTest {
     }
 
     @Test
-    fun preservesV511AggregationAcrossAccounts() {
+    fun keepsPerAccountLogLines() {
         var state = TaskRunReducer.start(lanes)
         state = TaskRunReducer.appendLog(state, "[账号甲] 签到成功 +5分")
         state = TaskRunReducer.appendLog(state, "[账号乙] 签到成功 +5分")
 
-        assertEquals(listOf("签到成功 +10分（5分 × 2）"), state.logs)
+        // 日志按账号分卡片展示，不再跨账号合并成一行。
+        assertEquals(
+            listOf("[账号甲] 签到成功 +5分", "[账号乙] 签到成功 +5分"),
+            state.logs
+        )
     }
 
     @Test

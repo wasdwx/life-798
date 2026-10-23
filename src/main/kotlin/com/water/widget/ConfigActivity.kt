@@ -156,7 +156,7 @@ class ConfigActivity : ComponentActivity() {
         val openedForRecovery = intent.getBooleanExtra(EXTRA_OPEN_WATER_RECOVERY, false)
         if (openedForRecovery) {
             intent.removeExtra(EXTRA_OPEN_WATER_RECOVERY)
-            ui.post { toast("控制中心出水失败，请检查设备登录信息、设备与签约状态") }
+            ui.post { toast("控制中心出水失败，请检查用水登录信息、设备与签约状态") }
         }
     }
 
@@ -337,20 +337,13 @@ class ConfigActivity : ComponentActivity() {
             if (json?.optInt("code", -999) == 0) {
                 score = json.optJSONObject("data")?.optJSONObject("accScoreRsp")?.optInt("validScore")
             } else if (json?.optInt("code", -999) == -99) {
-                // 先复核再判定：误判时保留登录信息（见 AuthGuard）
-                val platformLabel = if (platform == TaskPlatform.APP) "设备" else "积分"
-                AuthGuard.handleAuthFailure(this, account.phone, platform, token, "config") { verdict ->
-                    runOnUiThread {
-                        if (destroyed || generation != scoreGeneration) return@runOnUiThread
-                        viewModel.reloadAccounts()
-                        toast(
-                            when (verdict) {
-                                AuthGuard.Verdict.RECOVERED -> "登录信息复核通过，未失效"
-                                AuthGuard.Verdict.SUSPECT -> platformLabel + "登录疑似失效，正在复核"
-                                AuthGuard.Verdict.CONFIRMED -> platformLabel + "登录已过期，请重新登录"
-                            }
-                        )
-                    }
+                // -99 只记状态、不删登录信息：网关 401、签名跨桶、服务端抖动都可能返回它，
+                // 一次误判就让用户重走「图形码 + 短信码」的代价太高。真正的清理交给用户在账户页操作。
+                val useApp = platform == TaskPlatform.APP
+                if (!destroyed && generation == scoreGeneration) {
+                    LoginStatusStore.record(account, useApp, TokenValidity.EXPIRED)
+                    TokenValidity.expiredMessage(json, useApp)?.let { toast(it) }
+                    viewModel.reloadAccounts()
                 }
             }
             complete()
@@ -492,7 +485,7 @@ class ConfigActivity : ComponentActivity() {
             return false
         }
         if (!account.hasAppToken()) {
-            toast("请用同一手机号再次短信登录，并选择设备登录")
+            toast("请用同一手机号再次短信登录，并选择用水登录")
             return false
         }
 

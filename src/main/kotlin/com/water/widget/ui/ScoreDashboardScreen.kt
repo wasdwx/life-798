@@ -47,12 +47,16 @@ import androidx.compose.ui.unit.sp
 private const val INITIAL_LOG_COUNT = 8
 private const val LOG_PAGE_SIZE = 12
 
+/** 账单接口每页固定 20 条，返回满一页就说明可能还有下一页。 */
+private const val BILL_PAGE_SIZE = 20
+
 @Composable
 fun ScoreDashboardScreen(
     states: List<ScoreUiState>,
     refreshing: Boolean,
     onRefresh: () -> Unit,
     onLoadBillPayment: (accountIndex: Int, billId: String) -> Unit,
+    onLoadMoreBills: (accountIndex: Int) -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     val totalAvailableScore = states.filter { it.isReady }.sumOf { it.validScore }
@@ -130,7 +134,11 @@ fun ScoreDashboardScreen(
                 } else {
                     itemsIndexed(states, key = { _, state -> state.accountName }) { index, state ->
                         PullRefreshOffsetContent(pullOffset) {
-                            ScoreAccountCard(state, onLoadBillPayment = { billId -> onLoadBillPayment(index, billId) })
+                            ScoreAccountCard(
+                                state = state,
+                                onLoadBillPayment = { billId -> onLoadBillPayment(index, billId) },
+                                onLoadMoreBills = { onLoadMoreBills(index) }
+                            )
                         }
                     }
                 }
@@ -165,7 +173,11 @@ private fun ScoreSummaryCard(accountCount: Int, readyAccountCount: Int, totalAva
 }
 
 @Composable
-private fun ScoreAccountCard(state: ScoreUiState, onLoadBillPayment: (String) -> Unit) {
+private fun ScoreAccountCard(
+    state: ScoreUiState,
+    onLoadBillPayment: (String) -> Unit,
+    onLoadMoreBills: () -> Unit = {}
+) {
     var showBills by rememberSaveable(state.accountName) { mutableStateOf(false) }
 
     Card(
@@ -202,7 +214,7 @@ private fun ScoreAccountCard(state: ScoreUiState, onLoadBillPayment: (String) ->
                 FilterChip(selected = showBills, onClick = { showBills = true }, label = { Text("接水消费") })
             }
 
-            if (showBills) WaterBillList(state, onLoadBillPayment) else ScoreLogList(state)
+            if (showBills) WaterBillList(state, onLoadBillPayment, onLoadMoreBills) else ScoreLogList(state)
         }
     }
 }
@@ -242,36 +254,52 @@ private fun ScoreLogList(state: ScoreUiState) {
     }
 
     if (hasMoreLogs) {
-        MoreButton(state.logs.size - visibleLogCount) {
+        MoreButton(state.logs.size - visibleLogCount, onClick = {
             visibleLogCount = (visibleLogCount + LOG_PAGE_SIZE).coerceAtMost(state.logs.size)
-        }
+        })
     } else if (state.logs.size > INITIAL_LOG_COUNT) {
         Text("已展示 ${state.logs.size} 条最近记录", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
     }
 }
 
 @Composable
-private fun WaterBillList(state: ScoreUiState, onLoadBillPayment: (String) -> Unit) {
-    var visibleCount by rememberSaveable(state.accountName, state.bills.size) {
+private fun WaterBillList(
+    state: ScoreUiState,
+    onLoadBillPayment: (String) -> Unit,
+    onLoadMoreBills: () -> Unit
+) {
+    var visibleCount by rememberSaveable(state.accountName) {
         mutableIntStateOf(INITIAL_LOG_COUNT)
+    }
+    // 翻页新到的记录直接展开，否则刚加载完又要再点一次"查看更多"。
+    var knownSize by remember(state.accountName) { mutableIntStateOf(state.bills.size) }
+    LaunchedEffect(state.bills.size) {
+        if (state.bills.size > knownSize) {
+            visibleCount += state.bills.size - knownSize
+            knownSize = state.bills.size
+        }
     }
     Text(
         if (state.billLoading) "正在加载接水记录…" else state.billMessage,
         fontSize = 12.sp,
         color = MaterialTheme.colorScheme.onSurfaceVariant
     )
-    if (state.bills.isEmpty()) return
-
-    Column {
-        state.bills.take(visibleCount).forEachIndexed { index, bill ->
-            if (index > 0) HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
-            WaterBillRow(bill, onLoad = { onLoadBillPayment(bill.id) })
+    if (state.bills.isNotEmpty()) {
+        Column {
+            state.bills.take(visibleCount).forEachIndexed { index, bill ->
+                if (index > 0) HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
+                WaterBillRow(bill, onLoad = { onLoadBillPayment(bill.id) })
+            }
+        }
+        if (visibleCount < state.bills.size) {
+            MoreButton(state.bills.size - visibleCount, onClick = {
+                visibleCount = (visibleCount + LOG_PAGE_SIZE).coerceAtMost(state.bills.size)
+            })
         }
     }
-    if (visibleCount < state.bills.size) {
-        MoreButton(state.bills.size - visibleCount) {
-            visibleCount = (visibleCount + LOG_PAGE_SIZE).coerceAtMost(state.bills.size)
-        }
+    // 已取到的都展示完了、服务端还有更多页时，才向后端要下一页。
+    if (visibleCount >= state.bills.size && state.hasMoreBills && !state.billLoading) {
+        MoreButton(BILL_PAGE_SIZE, onLoadMoreBills, "加载更多接水记录")
     }
     Text(
         "接水记录包含积分与金额支付，不代表完整钱包收支。",
@@ -337,8 +365,12 @@ private fun PaymentLine(label: String, value: String, labelColor: Color, bold: B
 }
 
 @Composable
-private fun MoreButton(remaining: Int, onClick: () -> Unit) {
+private fun MoreButton(
+    remaining: Int,
+    onClick: () -> Unit,
+    label: String = "查看更多记录（剩余 $remaining 条）"
+) {
     FilledTonalButton(onClick = onClick, modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(14.dp)) {
-        Text("查看更多记录（剩余 $remaining 条）")
+        Text(label)
     }
 }

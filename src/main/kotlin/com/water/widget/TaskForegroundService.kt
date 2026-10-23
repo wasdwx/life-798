@@ -862,9 +862,9 @@ class TaskForegroundService : Service() {
     private fun recordTokenFailure(account: Account, platform: TaskPlatform, token: String, json: JSONObject?) {
         if (json?.optInt("code", -999) != -99) return
         expiredTokens += token
-        // 不立刻删除登录信息：先复核，确认失效才清除（见 AuthGuard）。
+        // 按上游模型：不自动删除登录信息，只记录状态，由账户页/首页展示「需重新验证」。
         // 误判（网关 401、签名跨桶、服务端抖动）不再把用户踢成未登录。
-        AuthGuard.handleAuthFailure(this, account.phone, platform, token, "task")
+        LoginStatusStore.record(account, platform == TaskPlatform.APP, TokenValidity.EXPIRED)
     }
 
     private fun canUseToken(account: Account, platform: TaskPlatform, token: String): Boolean {

@@ -203,8 +203,8 @@ public class IlifeApi {
 
     /**
      * 用指定 token + 指定客户端身份获取账户信息。
-     * 供 AuthGuard 做登录态复核使用：复核必须使用与失败请求相同的身份头，
-     * 否则"身份不一致"本身就会导致复核失败，把误判坐实。
+     * 供登录态检查（账户页 checkLogins）使用：检查必须使用与失败请求相同的身份头，
+     * 否则"身份不一致"本身就会导致检查失败，把误判坐实。
      */
     public static void viewInfoWithToken(final String token, final String appType,
                                          final String versionCode, final JsonCallback cb) {
@@ -216,6 +216,25 @@ public class IlifeApi {
                 cb.onResult(null, e.getMessage());
             }
         }).start();
+    }
+
+    /**
+     * 只读检查一条登录信息当前是否仍然有效。
+     *
+     * 只打 /acc/view-info（与失败请求使用同一身份头），不轮换、不写入、不删除本地登录信息，
+     * 因此可以在账户页放心地批量调用。
+     *
+     * 注意：这里刻意不复用上游的 /acc/stat 签名链路——那需要独立的时间桶签名盐值，
+     * 而当前只用只读账户信息做「是否还能读到自己的账户」这一层判定，足够区分
+     * 「登录真的失效」与「网关 401 / 签名跨桶 / 服务端抖动」这类误判。
+     */
+    public static void checkLoginStatus(final String token, final String appType,
+                                       final String versionCode, final JsonCallback cb) {
+        if (token == null || token.isEmpty()) {
+            cb.onResult(null, "登录信息为空");
+            return;
+        }
+        viewInfoWithToken(token, appType, versionCode, cb);
     }
 
     /**
@@ -258,11 +277,22 @@ public class IlifeApi {
 
     /** 用设备控制登录信息获取最近账单；type=91 为设备消费。 */
     public static void billListWithToken(final String token, final JsonCallback cb) {
+        billListWithToken(token, 0, cb);
+    }
+
+    /**
+     * 分页读取账单；page 从 0 开始，每页 20 条。
+     *
+     * 分页只影响「取第几页」，不影响「哪一页算最新」：调用方第一次翻页必须从 page=0 开始，
+     * 否则会跳过最近的记录。
+     */
+    public static void billListWithToken(final String token, final int page, final JsonCallback cb) {
+        final int safePage = Math.max(0, page);
         new Thread(() -> {
             try {
                 String body = httpRawApp(
                         "GET",
-                        GATEWAY + "/bill/lst-owner?page=0&size=20",
+                        GATEWAY + "/bill/lst-owner?page=" + safePage + "&size=20",
                         null,
                         token,
                         "1,1"
