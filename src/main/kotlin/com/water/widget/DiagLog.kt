@@ -135,6 +135,7 @@ object DiagLog {
     private const val PREFS = "diag_log"
     private const val KEY_ENABLED = "enabled"
     private const val KEY_VERBOSE = "verbose"
+    private const val KEY_REDACTOR_VERSION = "redactor_version"
     private const val KEY_TAG_SECRET = "tag_secret"
 
     const val MAX_FILE_BYTES = 1024L * 1024
@@ -184,6 +185,20 @@ object DiagLog {
         rotating = RotatingLog(app.filesDir, "diag.", MAX_FILE_BYTES, FILE_COUNT)
         errorLog = TruncatingLog(File(app.filesDir, ERROR_FILE_NAME), ERROR_FILE_BYTES)
         applyTagger()
+        rotateOnRedactorChange(prefs)
+    }
+
+    /**
+     * 脱敏规则升级后，旧日志里可能还留着按旧规则写下的明文。
+     * 版本一变就整份清掉，宁可丢掉历史诊断信息，也不让明文长期驻留。
+     */
+    private fun rotateOnRedactorChange(prefs: android.content.SharedPreferences) {
+        val stored = prefs.getInt(KEY_REDACTOR_VERSION, 0)
+        if (stored == AuthRedactor.VERSION) return
+        // 老版本没有记录过版本号（stored=0），也一并清空：那些日志是按旧规则写的。
+        clear()
+        info("脱敏规则已升级（v" + stored + " -> v" + AuthRedactor.VERSION + "），历史日志已清空")
+        prefs.edit().putInt(KEY_REDACTOR_VERSION, AuthRedactor.VERSION).apply()
     }
 
     fun isEnabled(): Boolean = enabled
@@ -371,7 +386,12 @@ object DiagLog {
         ZipOutputStream(out.outputStream()).use { zos ->
             for (f in sources) {
                 zos.putNextEntry(ZipEntry(f.name))
-                f.inputStream().use { it.copyTo(zos) }
+                // 历史日志可能由旧版脱敏规则写入，导出前整体再过一遍，避免明文随文件流出。
+                f.bufferedReader().useLines { lines ->
+                    lines.forEach { line ->
+                        zos.write((AuthRedactor.scrubFreeText(line) + "\n").toByteArray())
+                    }
+                }
                 zos.closeEntry()
             }
         }

@@ -12,5 +12,10 @@ class App : Application() {
     override fun onCreate() {
         super.onCreate()
         DiagLog.init(this)
+        // 上次因网络失败没跑完的任务，进程重启后立刻重新挂上「网络恢复即重试」的回调。
+        try {
+            if (AutoTasks.hasPendingCatchUp(this)) AutoTasks.armNetworkRecovery(this)
+        } catch (_: Throwable) {
+        }
     }
 }

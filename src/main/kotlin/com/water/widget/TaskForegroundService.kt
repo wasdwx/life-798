@@ -822,8 +822,11 @@ class TaskForegroundService : Service() {
         // 只要这批没有网络失败，就把之前的补跑计划取消掉。
         if (networkFailures) {
             AutoTasks.scheduleCatchUp(this)
+            // 闹钟只是兜底：网络一恢复就立刻重试，不必等到 +15 分钟。
+            AutoTasks.armNetworkRecovery(this)
         } else {
             AutoTasks.clearCatchUp(this)
+            AutoTasks.disarmNetworkRecovery(this)
         }
         TaskRunRepository.finish(partial = hadFailures)
         taskLease?.let(TaskExecutionCoordinator::release)

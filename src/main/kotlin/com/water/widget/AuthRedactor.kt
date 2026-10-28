@@ -27,6 +27,12 @@ import java.util.Locale
  */
 object AuthRedactor {
 
+    /**
+     * 脱敏规则版本。规则一旦收紧就 +1，DiagLog 会据此清掉按旧规则写的历史日志，
+     * 避免旧明文（例如未脱敏的 IP/经纬度）长期留在设备上被导出。
+     */
+    const val VERSION = 2
+
     private const val MAX_BODY_CHARS = 8192
     private const val MAX_RENDERED_CHARS = 2000
     private const val MAX_OBJECT_KEYS = 40

@@ -48,7 +48,10 @@ object NetReady {
         return try {
             cm.registerNetworkCallback(request, callback)
             val ok = latch.await(timeoutMs, TimeUnit.MILLISECONDS)
-            DiagLog.info(if (ok) "NETREADY usable" else "NETREADY timeout after " + timeoutMs + "ms")
+            DiagLog.info(
+                if (ok) "NETREADY usable"
+                else "NETREADY timeout after " + timeoutMs + "ms (" + describe(cm) + ")"
+            )
             ok
         } catch (t: Throwable) {
             // 注册失败（权限/系统异常）就不要卡住任务，按可用处理，交给请求自己失败。
@@ -60,6 +63,27 @@ object NetReady {
             } catch (_: Throwable) {
             }
         }
+    }
+
+    /**
+     * 把当前网络状态写进日志（只有类型与能力位，不含任何标识）。
+     * 用来区分「真的没网」「连着但未验证」「被系统挂起」「走了 VPN」这几种情况。
+     */
+    private fun describe(cm: ConnectivityManager): String {
+        val network = cm.activeNetwork ?: return "no active network"
+        val caps = cm.getNetworkCapabilities(network) ?: return "no capabilities"
+        val transports = ArrayList<String>(4)
+        if (caps.hasTransport(NetworkCapabilities.TRANSPORT_WIFI)) transports.add("wifi")
+        if (caps.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR)) transports.add("cell")
+        if (caps.hasTransport(NetworkCapabilities.TRANSPORT_VPN)) transports.add("vpn")
+        if (caps.hasTransport(NetworkCapabilities.TRANSPORT_ETHERNET)) transports.add("ethernet")
+        val flags = ArrayList<String>(3)
+        if (caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)) flags.add("internet")
+        if (caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED)) flags.add("validated")
+        if (!caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_NOT_SUSPENDED)) flags.add("suspended")
+        val t = if (transports.isEmpty()) "unknown" else transports.joinToString("+")
+        val f = if (flags.isEmpty()) "none" else flags.joinToString(",")
+        return t + " [" + f + "]"
     }
 
     private fun isUsable(cm: ConnectivityManager): Boolean {

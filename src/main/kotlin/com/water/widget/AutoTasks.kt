@@ -7,6 +7,10 @@ import android.app.PendingIntent
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
+import android.net.ConnectivityManager
+import android.net.Network
+import android.net.NetworkCapabilities
+import android.net.NetworkRequest
 import java.time.LocalTime
 import java.time.ZonedDateTime
 
@@ -16,10 +20,26 @@ object AutoTasks {
     private const val CATCHUP_REQUEST = 2403
     private const val KEY_CATCHUP_ATTEMPT = "catchup_attempt"
 
-    /** 整批网络失败后的补跑间隔：+15 分钟、+30 分钟、+60 分钟，最多 3 次。 */
-    private val CATCHUP_DELAYS_MS = longArrayOf(15 * 60_000L, 30 * 60_000L, 60 * 60_000L)
+    /**
+     * 整批网络失败后的补跑间隔：+15 分、+30 分、+1 时、+2 时、+4 时，共 5 次。
+     *
+     * 原来的 3 次只覆盖 1 小时：凌晨设备没网（Doze/关 Wi-Fi）时，2 小时都恢复不了，
+     * 补跑全部用完就直接放弃到第二天。拉长到约 8 小时，并配合网络恢复回调立即重试。
+     */
+    private val CATCHUP_DELAYS_MS = longArrayOf(
+        15 * 60_000L, 30 * 60_000L, 60 * 60_000L, 2 * 60 * 60_000L, 4 * 60 * 60_000L
+    )
+
+    /** 网络恢复回调（一次性）；进程被杀后由 AlarmManager 的补跑兜底。 */
+    private var networkCallback: ConnectivityManager.NetworkCallback? = null
+    private var networkArmedAt = 0L
+    /** 刚注册时系统会立刻回报一次「当前已有网络」，这段时间内的回调不算「恢复」。 */
+    private const val NETWORK_ARM_GRACE_MS = 90_000L
 
     private fun prefs(context: Context) = context.getSharedPreferences("auto_tasks", Context.MODE_PRIVATE)
+
+    /** 是否还有未完成的补跑计划（用于进程重启后重新挂上网络回调）。 */
+    fun hasPendingCatchUp(context: Context) = prefs(context).getInt(KEY_CATCHUP_ATTEMPT, 0) > 0
     fun enabled(context: Context) = prefs(context).getBoolean("enabled", false)
     fun minute(context: Context) = prefs(context).getInt("minute", 540).coerceIn(0, 1439)
     fun allowed(context: Context) = context.getSystemService(AlarmManager::class.java).canScheduleExactAlarms()
@@ -82,8 +102,57 @@ object AutoTasks {
         }
     }
 
+    /**
+     * 挂一个一次性网络回调：网络一恢复就立刻触发补跑，不用干等到下一个闹钟点。
+     *
+     * 只影响本进程存活期间；进程被杀后 AlarmManager 的补跑仍然有效，两者互为兜底。
+     */
+    fun armNetworkRecovery(context: Context) {
+        if (!enabled(context)) return
+        if (networkCallback != null) return
+        val cm = context.getSystemService(ConnectivityManager::class.java) ?: return
+        val app = context.applicationContext
+        val callback = object : ConnectivityManager.NetworkCallback() {
+            override fun onAvailable(network: Network) {
+                val elapsed = System.currentTimeMillis() - networkArmedAt
+                if (elapsed < NETWORK_ARM_GRACE_MS) return
+                DiagLog.info("AUTOTASK network recovered, retrying now")
+                disarmNetworkRecovery(app)
+                try {
+                    app.sendBroadcast(Intent(app, AutoTaskReceiver::class.java).setAction(ACTION_CATCHUP))
+                } catch (_: Throwable) {
+                }
+            }
+        }
+        networkArmedAt = System.currentTimeMillis()
+        networkCallback = callback
+        try {
+            cm.registerNetworkCallback(
+                NetworkRequest.Builder()
+                    .addCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
+                    .build(),
+                callback
+            )
+            DiagLog.info("AUTOTASK network recovery armed")
+        } catch (_: Throwable) {
+            networkCallback = null
+        }
+    }
+
+    /** 任务成功或关闭自动任务时撤掉网络回调。 */
+    fun disarmNetworkRecovery(context: Context) {
+        val callback = networkCallback ?: return
+        networkCallback = null
+        try {
+            context.getSystemService(ConnectivityManager::class.java)
+                ?.unregisterNetworkCallback(callback)
+        } catch (_: Throwable) {
+        }
+    }
+
     /** 任务正常跑完（没有网络失败）或用户关掉自动任务时调用，取消补跑并清零计数。 */
     fun clearCatchUp(context: Context) {
+        disarmNetworkRecovery(context)
         val alarm = context.getSystemService(AlarmManager::class.java)
         alarm.cancel(PendingIntent.getBroadcast(context, CATCHUP_REQUEST, catchUpIntent(context),
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE))
